@@ -29,6 +29,11 @@ trackers: []
 #    team: PROJ
 #    tier: primary
 
+# ---- SELF-INGESTION: fold this KG repo itself into the graph ----------------
+# When true, the graph also ingests THIS repo (git spine + docs), so the KG can
+# answer questions about its own internals. Recommended once the KG is real.
+self_ingest: false
+
 # ---- SECONDARY: related code repos folded into the same graph on request ----
 secondary_repos: []
 #  - slug: your-org/related-repo

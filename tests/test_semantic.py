@@ -13,9 +13,10 @@ except ImportError:
 
 from kg_query import semantic
 from kg_query.store import RdflibStore
+from kg_ingest.iris import NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings
 
-FIXTURE = """
+FIXTURE_RAW = """
 @prefix kg: <https://example.org/kg/onto#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -32,6 +33,7 @@ FIXTURE = """
   <https://example.org/kg/resource/topic/branching> a kg:Topic ; skos:prefLabel "branching" .
 }
 """
+FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
 
 def test_missing_sidecar():
     r = semantic.semantic_search("anything", npz_path=Path("/nonexistent/x.npz"))

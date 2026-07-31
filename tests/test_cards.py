@@ -2,10 +2,11 @@
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_cards.py
 """
 import os, tempfile
+from kg_ingest.iris import NAMESPACE as _NS
 from kg_ingest.cards import build_cards, SNIPPET_CHARS
 from kg_query.store import RdflibStore
 
-FIXTURE = """
+FIXTURE_RAW = """
 @prefix kg: <https://example.org/kg/onto#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -30,6 +31,7 @@ FIXTURE = """
     kg:description "No tags on this one." .
 }
 """
+FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
 
 def main():
     with tempfile.NamedTemporaryFile("w", suffix=".trig", delete=False) as f:
