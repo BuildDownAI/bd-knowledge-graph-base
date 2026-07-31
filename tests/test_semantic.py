@@ -13,7 +13,7 @@ except ImportError:
 
 from kg_query import semantic
 from kg_query.store import RdflibStore
-from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings
 
 FIXTURE_RAW = """
@@ -33,7 +33,7 @@ FIXTURE_RAW = """
   <https://example.org/kg/resource/topic/branching> a kg:Topic ; skos:prefLabel "branching" .
 }
 """
-FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
+FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
 def test_missing_sidecar():
     r = semantic.semantic_search("anything", npz_path=Path("/nonexistent/x.npz"))

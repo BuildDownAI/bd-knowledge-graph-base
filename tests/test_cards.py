@@ -2,7 +2,7 @@
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_cards.py
 """
 import os, tempfile
-from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.cards import build_cards, SNIPPET_CHARS
 from kg_query.store import RdflibStore
 
@@ -31,7 +31,7 @@ FIXTURE_RAW = """
     kg:description "No tags on this one." .
 }
 """
-FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
+FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
 def main():
     with tempfile.NamedTemporaryFile("w", suffix=".trig", delete=False) as f:

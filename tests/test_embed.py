@@ -12,7 +12,7 @@ except ImportError:
     HAVE = False
 
 from kg_query.store import RdflibStore
-from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings, MODEL, DIM
 
 FIXTURE_RAW = """
@@ -28,7 +28,7 @@ FIXTURE_RAW = """
     dcterms:title "Use rdflib" ; kg:detail "Zero-infra local dev." .
 }
 """
-FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
+FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
 def main():
     if not HAVE:

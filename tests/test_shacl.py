@@ -5,16 +5,16 @@ adding both MUST make it pass. Run: python -m pytest tests/  (or plain python).
 """
 from pathlib import Path
 
+from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest import ontology as _onto
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, XSD, Namespace
 from pyshacl import validate
 
 ONTO = Path(__file__).resolve().parent.parent / "ontology"
-KG = Namespace("https://example.org/kg/onto#")
+KG = Namespace(f"{_NS}onto#")
 PROV = Namespace("http://www.w3.org/ns/prov#")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
-from kg_ingest.iris import NAMESPACE as _NS
-from kg_ingest import ontology as _onto
 EX = Namespace(f"{_NS}resource/")
 
 

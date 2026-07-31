@@ -13,7 +13,7 @@ except ImportError:
 
 from kg_query import hybrid, semantic
 from kg_query.store import RdflibStore
-from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings
 
 FIXTURE_RAW = """
@@ -37,7 +37,7 @@ FIXTURE_RAW = """
     kg:description "Widgets flicker on load." .
 }
 """
-FIXTURE = FIXTURE_RAW.replace(_NS, _NS)
+FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
 
 def _fixture_store():
