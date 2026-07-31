@@ -25,7 +25,13 @@ def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
 
     cards = build_cards(store)
     if not cards:
-        raise RuntimeError("no cards built — is out/graph.trig populated?")
+        # A fresh KG (no Learnings/Decisions/Issues yet) has nothing to embed.
+        # Skip without writing a sidecar: hybrid search degrades to lexical-only
+        # until content exists, exactly like the sidecar-absent case.
+        n_quads = int(store.select("SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")[0]["n"])
+        return {"model": MODEL, "dim": DIM, "count": 0,
+                "built_from_quads": n_quads, "card_fields": CARD_FIELDS,
+                "skipped": "no Learning/Decision/Issue cards in the graph yet"}
     texts = [c["card_text"] for c in cards]
     model = TextEmbedding(model_name=MODEL)
     vecs = np.asarray(list(model.embed(texts)), dtype=np.float32)

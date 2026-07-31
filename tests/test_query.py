@@ -1,63 +1,67 @@
-"""Exercise the read tools on BOTH backends and check parity.
+"""Exercise the read tools against a self-contained fixture graph.
 
-Run: ./.venv/bin/python tests/test_query.py
-(rdflib always; Stardog only if reachable on localhost:5820).
+Run: PYTHONPATH=. ./.venv/bin/python tests/test_query.py
+(Backend parity rdflib vs Stardog lives in tests/compare_backends.py — it needs a
+loaded Stardog and real data, so it is not part of this template's default suite.)
 """
 import json
-import os
+import tempfile
+from pathlib import Path
 
 from kg_query import queries
-from kg_query.store import RdflibStore, StardogStore
+from kg_query.store import RdflibStore
 
+NS = "https://example.org/kg/"
 
-def _stardog_or_none():
-    try:
-        s = StardogStore("http://localhost:5820", "aiimplement_kg", "admin", "admin")
-        s.select("SELECT * WHERE { ?s ?p ?o } LIMIT 1")
-        return s
-    except Exception as e:
-        print(f"  (Stardog not reachable, skipping parity: {e.__class__.__name__})")
-        return None
-
-
-def _iris(res):
-    return {r["iri"] for r in res["results"]}
+FIXTURE = f"""
+@prefix kg: <{NS}onto#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+<{NS}resource/graph/spine> {{
+  <{NS}resource/doc/example/webhook-retries> a kg:Doc ;
+    dcterms:title "Webhook retry playbook" .
+  <{NS}resource/topic/webhook> a kg:Topic ; skos:prefLabel "webhook" .
+}}
+<{NS}resource/graph/run/testrun> {{
+  <{NS}resource/run/testrun> a kg:ExtractionRun ;
+    kg:pipelineVer "0.0-test" ; kg:model "deterministic-parser" ;
+    kg:promptHash "n/a" .
+  <{NS}resource/learning/webhook-dedup> a kg:Learning ;
+    dcterms:title "Webhook deliveries can duplicate - consumers must dedup" ;
+    kg:fix "Key handling on the delivery id; ignore repeats." ;
+    kg:tagged <{NS}resource/topic/webhook> ;
+    prov:wasDerivedFrom <{NS}resource/doc/example/webhook-retries> ;
+    prov:wasGeneratedBy <{NS}resource/run/testrun> .
+}}
+"""
 
 
 def main():
-    rd = RdflibStore()
-    sd = _stardog_or_none()
+    d = tempfile.mkdtemp()
+    p = Path(d, "g.trig")
+    p.write_text(FIXTURE)
+    rd = RdflibStore(p)
 
-    print("== kg_search('webhook') [rdflib] ==")
+    print("== kg_search('webhook') ==")
     r = queries.kg_search(rd, "webhook", limit=5)
-    assert r["count"] > 0, "expected webhook lessons"
-    for x in r["results"]:
-        print(f"  - [{x.get('priority')}] {x['title'][:70]}  via {x['matched_topics']}")
+    assert r["count"] > 0, "expected the webhook learning"
+    hit = r["results"][0]
+    print(f"  - {hit['title'][:70]}  via {hit['matched_topics']}")
 
-    print("== kg_search('feature-branch') [rdflib] ==")
-    r2 = queries.kg_search(rd, "feature-branch", limit=6)
-    assert r2["count"] > 0
-
-    # ---- backend parity: same result set on rdflib and Stardog ----
-    if sd:
-        for term in ("webhook", "feature-branch", "envelope", "comment-trigger"):
-            a = _iris(queries.kg_search(rd, term, limit=25))
-            b = _iris(queries.kg_search(sd, term, limit=25))
-            assert a == b, f"backend mismatch for {term!r}: only-rdflib={a-b} only-stardog={b-a}"
-        print("== backend parity: rdflib == stardog for all probe terms  OK ==")
-
-    # ---- provenance of a search hit ----
-    sample = queries.kg_search(rd, "webhook", limit=1)["results"][0]["iri"]
-    prov = queries.kg_provenance(rd, sample)
-    print("== kg_provenance(sample) ==")
+    print("== kg_provenance(hit) ==")
+    prov = queries.kg_provenance(rd, hit["iri"])
     print("  " + json.dumps({k: prov[k] for k in ("types", "generated_by")}, default=str))
     assert prov["generated_by"] and prov["derived_from"], "hit must carry provenance"
 
-    # ---- neighbors of a topic ----
-    topic_iri = "https://example.org/kg/resource/topic/webhook"
+    topic_iri = f"{NS}resource/topic/webhook"
     nb = queries.kg_neighbors(rd, topic_iri, limit=10)
     print(f"== kg_neighbors(topic/webhook): {nb['count']} edges ==")
     assert nb["count"] > 0
+
+    path = queries.kg_path(rd, hit["iri"], f"{NS}resource/doc/example/webhook-retries", max_len=3)
+    assert path["reachable"], path
+    print(f"== kg_path(learning -> doc): reachable in {path['length']} hop(s) ==")
 
     print("\nALL QUERY CHECKS PASSED")
 

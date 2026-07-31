@@ -1,0 +1,6 @@
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <http://purl.org/dc/terms/created> "2026-07-31T16:10:49-06:00"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <http://purl.org/dc/terms/title> "bootstrap: bd-knowledge-graph-base — sanitized KG template" .
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Commit> .
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/John%20O%27Dwyer> .
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <https://example.org/kg/onto#partOf> <https://example.org/kg/resource/repo/your-org%2Fyour-project> .
+<https://example.org/kg/resource/commit/your-org%2Fyour-project/0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4> <https://example.org/kg/onto#sourceId> "0ba67bef979f411ba5e37b8e5c9c26b5a4c2fff4" .

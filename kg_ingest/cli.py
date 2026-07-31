@@ -13,7 +13,7 @@ from pathlib import Path
 from rdflib import Dataset, Graph
 from pyshacl import validate
 
-from . import iris, spine, semantic, snapshot
+from . import iris, ontology, spine, semantic, snapshot
 
 ONTO_DIR = Path(__file__).resolve().parent.parent / "ontology"
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
@@ -121,8 +121,8 @@ def main(argv=None) -> int:
     union = Graph()
     for s, p, o, _ in ds.quads((None, None, None, None)):
         union.add((s, p, o))
-    shapes = Graph().parse(ONTO_DIR / "shapes.ttl", format="turtle")
-    onto = Graph().parse(ONTO_DIR / "kg.ttl", format="turtle")
+    shapes = ontology.load("shapes.ttl")
+    onto = ontology.load("kg.ttl")
     union += onto  # class hierarchy available to validation
     print("== SHACL validation ==")
     conforms, _rg, rtext = validate(
@@ -145,7 +145,10 @@ def main(argv=None) -> int:
             from . import embed as embed_mod
             from kg_query.store import RdflibStore
             e = embed_mod.build_embeddings(RdflibStore(trig_path))
-            print(f"== embeddings -> {e['count']} cards ({e['model']}, dim {e['dim']}) ==")
+            if e.get("skipped"):
+                print(f"== embeddings skipped: {e['skipped']} ==")
+            else:
+                print(f"== embeddings -> {e['count']} cards ({e['model']}, dim {e['dim']}) ==")
         except ImportError as exc:
             print(f"== embeddings SKIPPED (fastembed not installed: {exc}); "
                   f"semantic/hybrid search will be stale — `pip install fastembed` "

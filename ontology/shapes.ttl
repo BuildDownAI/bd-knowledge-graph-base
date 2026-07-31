@@ -1,5 +1,5 @@
 @prefix sh:      <http://www.w3.org/ns/shacl#> .
-@prefix kg:      <https://kg.oolidata.dev/onto#> .
+@prefix kg:      <https://example.org/kg/onto#> .
 @prefix prov:    <http://www.w3.org/ns/prov#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
