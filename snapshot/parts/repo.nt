@@ -1,3 +1,7 @@
+<https://example.org/kg/resource/repo/BuildDownAI%2Fbd-knowledge-graph-base> <http://purl.org/dc/terms/title> "BuildDownAI/bd-knowledge-graph-base" .
+<https://example.org/kg/resource/repo/BuildDownAI%2Fbd-knowledge-graph-base> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Repo> .
+<https://example.org/kg/resource/repo/BuildDownAI%2Fbd-knowledge-graph-base> <https://example.org/kg/onto#sourceId> "BuildDownAI/bd-knowledge-graph-base" .
+<https://example.org/kg/resource/repo/BuildDownAI%2Fbd-knowledge-graph-base> <https://example.org/kg/onto#sourceSystem> "github" .
 <https://example.org/kg/resource/repo/your-org%2Fyour-project> <http://purl.org/dc/terms/title> "your-org/your-project" .
 <https://example.org/kg/resource/repo/your-org%2Fyour-project> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Repo> .
 <https://example.org/kg/resource/repo/your-org%2Fyour-project> <https://example.org/kg/onto#sourceId> "your-org/your-project" .
