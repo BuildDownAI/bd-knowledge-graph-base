@@ -11,7 +11,7 @@ from pathlib import Path
 from kg_query import queries
 from kg_query.store import RdflibStore
 
-NS = "https://example.org/kg/"
+from kg_ingest.iris import NAMESPACE as NS
 
 FIXTURE = f"""
 @prefix kg: <{NS}onto#> .

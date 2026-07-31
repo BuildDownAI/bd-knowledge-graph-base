@@ -5,20 +5,22 @@ adding both MUST make it pass. Run: python -m pytest tests/  (or plain python).
 """
 from pathlib import Path
 
+from kg_ingest.iris import NAMESPACE as _NS
+from kg_ingest import ontology as _onto
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, XSD, Namespace
 from pyshacl import validate
 
 ONTO = Path(__file__).resolve().parent.parent / "ontology"
-KG = Namespace("https://example.org/kg/onto#")
+KG = Namespace(f"{_NS}onto#")
 PROV = Namespace("http://www.w3.org/ns/prov#")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
-EX = Namespace("https://example.org/kg/resource/")
+EX = Namespace(f"{_NS}resource/")
 
 
 def _base() -> tuple[Graph, Graph]:
-    shapes = Graph().parse(ONTO / "shapes.ttl", format="turtle")
-    onto = Graph().parse(ONTO / "kg.ttl", format="turtle")
+    shapes = _onto.load("shapes.ttl")
+    onto = _onto.load("kg.ttl")
     return shapes, onto
 
 

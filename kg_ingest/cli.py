@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -110,6 +111,31 @@ def main(argv=None) -> int:
             sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
                                         pipeline_ver=args.pipeline_ver)
             print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
+
+    # ---- self-ingestion: the KG repo itself as a source (sources.yml self_ingest) ----
+    # Lets the graph answer questions about its OWN internals (ingest design,
+    # query tools, past changes) — the KG knows itself. Off by default.
+    from . import sources as _sources_mod
+    _cfg = _sources_mod.load()
+    if _cfg.get("self_ingest"):
+        self_root = OUT_DIR.parent
+        try:
+            origin = subprocess.run(["git", "-C", str(self_root), "remote", "get-url", "origin"],
+                                    capture_output=True, text=True, check=True).stdout.strip()
+            self_slug = "/".join(origin.removesuffix(".git").split("/")[-2:])
+        except Exception:
+            self_slug = "local/knowledge-graph"
+        print(f"== self-ingest: {self_slug} ({self_root}) ==")
+        ss = spine.add_spine(spine_g, self_root, self_slug,
+                             max_commits=max_commits, max_prs=args.max_prs)
+        for k, v in ss.items():
+            print(f"   {k}: {v}")
+        self_fp = iris.content_hash(f"self:{self_slug}")
+        self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
+        self_run_g = ds.graph(iris.run_graph(self_run_id))
+        sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
+                                         pipeline_ver=args.pipeline_ver)
+        print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
 
     # ---- serialize named graphs (TriG preserves the spine/run split) ----
     trig_path = OUT_DIR / "graph.trig"

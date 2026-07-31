@@ -13,9 +13,10 @@ except ImportError:
 
 from kg_query import hybrid, semantic
 from kg_query.store import RdflibStore
+from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings
 
-FIXTURE = """
+FIXTURE_RAW = """
 @prefix kg: <https://example.org/kg/onto#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -36,6 +37,7 @@ FIXTURE = """
     kg:description "Widgets flicker on load." .
 }
 """
+FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
 
 def _fixture_store():
