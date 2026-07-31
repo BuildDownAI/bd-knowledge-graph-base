@@ -1,0 +1,58 @@
+@prefix sh:      <http://www.w3.org/ns/shacl#> .
+@prefix kg:      <https://kg.oolidata.dev/onto#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+#################################################################
+# SHACL shapes — enforce the non-negotiable provenance invariant
+# (recon report §5.5). Every semantic node MUST anchor to >=1
+# spine node (prov:wasDerivedFrom) and name exactly one run
+# (prov:wasGeneratedBy). This replaces app-level enforcement.
+#################################################################
+
+kg:SemanticNodeShape a sh:NodeShape ;
+    sh:targetClass kg:Learning, kg:Decision, kg:Constraint,
+                   kg:FailureMode, kg:Observation, kg:Verification ;
+    sh:property [
+        sh:path prov:wasDerivedFrom ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "semantic node must anchor to >=1 spine node (prov:wasDerivedFrom)" ;
+    ] ;
+    sh:property [
+        sh:path prov:wasGeneratedBy ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class kg:ExtractionRun ;
+        sh:message "semantic node must name exactly one kg:ExtractionRun (prov:wasGeneratedBy)" ;
+    ] .
+
+# Learnings additionally need a human-readable title.
+kg:LearningShape a sh:NodeShape ;
+    sh:targetClass kg:Learning ;
+    sh:property [
+        sh:path dcterms:title ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "learning must have a dcterms:title" ;
+    ] ;
+    sh:property [
+        sh:path kg:priority ;
+        sh:maxCount 1 ;
+        sh:in ( "P0"^^xsd:string "P1"^^xsd:string "P2"^^xsd:string "P3"^^xsd:string ) ;
+        sh:message "priority, if present, must be one of P0..P3" ;
+    ] .
+
+# Extraction runs must be self-describing (auditability).
+kg:ExtractionRunShape a sh:NodeShape ;
+    sh:targetClass kg:ExtractionRun ;
+    sh:property [ sh:path kg:pipelineVer ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:model ;       sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:promptHash ;  sh:minCount 1 ; sh:datatype xsd:string ] .
+
+# Chunks must point at exactly one node and carry text.
+kg:ChunkShape a sh:NodeShape ;
+    sh:targetClass kg:Chunk ;
+    sh:property [ sh:path kg:ofNode ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path kg:text ;   sh:minCount 1 ; sh:datatype xsd:string ] .

@@ -1,0 +1,36 @@
+# =============================================================================
+# Knowledge-graph ingest sources — the single human-editable manifest.
+#
+# This file is the one place a person reads to see where the graph's knowledge
+# comes from, and edits to point the KG at their project. The defaults below are
+# neutral and self-referential so a fresh clone works out of the box:
+# `./setup.sh` builds a small graph of THIS repo. Point code_repo at your real
+# project (and add trackers) to build a real KG.
+# =============================================================================
+
+# ---- IRI namespace (per-deployment identity) --------------------------------
+# Every node IRI is minted under this namespace. Convention: https://kg.<org>.dev/
+# Changing it after a graph exists changes every IRI — set it once, up front.
+namespace: https://example.org/kg/
+
+# ---- PRIMARY: the code repo whose git history + docs seed the graph ---------
+code_repo:
+  slug: your-org/your-project           # GitHub owner/name (PRs pulled via `gh`)
+  path: .                               # local clone, relative to this repo
+  doc_globs:                            # semantic-layer source docs (see kg_ingest/semantic.py)
+    - docs/solutions/**/*.md            #   frontmatter "solutions"  -> kg:Learning
+    - docs/adr/*.md                     #   architecture decisions   -> kg:Decision
+    - docs/plans/*.md                   #   implementation plans     -> kg:Decision
+
+# ---- Trackers to ingest (Linear; Jira planned). tier: primary is bound to ---
+# ---- code_repo; secondary teams ride along. Requires LINEAR_API_KEY. --------
+trackers: []
+#  - kind: linear
+#    team: PROJ
+#    tier: primary
+
+# ---- SECONDARY: related code repos folded into the same graph on request ----
+secondary_repos: []
+#  - slug: your-org/related-repo
+#    path: ../related-repo
+#    tier: secondary

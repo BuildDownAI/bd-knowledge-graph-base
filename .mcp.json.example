@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this to .mcp.json (gitignored) and replace __REPO_DIR__ with the ABSOLUTE path to your clone of this repo, e.g. /Users/you/gitRepos/your KG clone. Then list the same entry in the project repo's .mcp.json (same server name everywhere).",
+  "mcpServers": {
+    "__PROJECT_SLUG__-kg": {
+      "command": "__REPO_DIR__/.venv/bin/python",
+      "args": ["-m", "kg_query.server"],
+      "cwd": "__REPO_DIR__",
+      "env": {
+        "KG_BACKEND": "rdflib",
+        "KG_SERVER_NAME": "__PROJECT_SLUG__-kg",
+        "PYTHONPATH": "__REPO_DIR__"
+      }
+    }
+  }
+}

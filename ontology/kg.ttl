@@ -1,0 +1,132 @@
+@prefix kg:      <https://kg.oolidata.dev/onto#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix prov:    <http://www.w3.org/ns/prov#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+@prefix foaf:    <http://xmlns.com/foaf/0.1/> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+#################################################################
+# AI-Implement Knowledge Graph — ontology (Phase 1)
+# Two layers: spine (deterministic — git + GitHub + tracker) +
+# semantic (parsed/extracted, always provenanced).
+# Recreated for BuildDownAI/AI-Implement per the KG runbook §2.
+#################################################################
+
+kg: a owl:Ontology ;
+    rdfs:label "AI-Implement Knowledge Graph ontology" ;
+    owl:versionInfo "0.1.0" .
+
+########################  SPINE CLASSES  ########################
+
+kg:Repo         a owl:Class ; rdfs:label "Repository" .
+kg:PullRequest  a owl:Class ; rdfs:label "Pull Request" .
+kg:Commit       a owl:Class ; rdfs:label "Commit" .
+kg:File         a owl:Class ; rdfs:label "File" .
+kg:Doc          a owl:Class ; rdfs:label "Document" ; rdfs:subClassOf kg:File .
+kg:Issue        a owl:Class ; rdfs:label "Tracker issue (Linear/Jira)" .
+kg:Project      a owl:Class ; rdfs:label "Tracker project" .
+kg:Person       a owl:Class ; rdfs:subClassOf foaf:Agent ; rdfs:label "Person" .
+kg:BotAgent     a owl:Class ; rdfs:subClassOf kg:Person ; rdfs:label "Bot agent" .
+
+######################  SEMANTIC CLASSES  ######################
+
+kg:Learning     a owl:Class ; rdfs:label "Learning" .
+kg:Decision     a owl:Class ; rdfs:label "Decision" .
+kg:Constraint   a owl:Class ; rdfs:label "Constraint" .
+kg:FailureMode  a owl:Class ; rdfs:label "Failure mode" .
+kg:Observation  a owl:Class ; rdfs:label "Observation (non-defect)" .
+kg:Verification a owl:Class ; rdfs:label "Verification / gap-analysis record" .
+kg:StatusUpdate a owl:Class ; rdfs:label "Status update event" .
+kg:Topic        a owl:Class ; rdfs:subClassOf skos:Concept ; rdfs:label "Topic (promoted tag)" .
+# optional facets, added later on evidence (recon §4.4):
+kg:Technology   a owl:Class ; rdfs:subClassOf kg:Topic .
+kg:Pattern      a owl:Class ; rdfs:subClassOf kg:Topic .
+kg:FailureClass a owl:Class ; rdfs:subClassOf kg:Topic .
+
+kg:Chunk        a owl:Class ; rdfs:label "Retrieval chunk" .
+
+# marker: the union of semantic node types that MUST carry provenance
+kg:SemanticNode a owl:Class ; rdfs:label "Semantic node (provenance-required)" .
+kg:Learning     rdfs:subClassOf kg:SemanticNode .
+kg:Decision     rdfs:subClassOf kg:SemanticNode .
+kg:Constraint   rdfs:subClassOf kg:SemanticNode .
+kg:FailureMode  rdfs:subClassOf kg:SemanticNode .
+kg:Observation  rdfs:subClassOf kg:SemanticNode .
+kg:Verification rdfs:subClassOf kg:SemanticNode .
+
+####################  PROVENANCE / VERSIONING  ####################
+
+kg:ExtractionRun a owl:Class ; rdfs:subClassOf prov:Activity ;
+    rdfs:label "Extraction run" .
+kg:pipelineVer  a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:range xsd:string .
+kg:promptHash   a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:range xsd:string .
+kg:model        a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:range xsd:string .
+kg:notes        a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:range xsd:string .
+
+########################  SPINE PREDICATES  ########################
+
+kg:partOf     a owl:ObjectProperty ; rdfs:label "part of" .
+kg:touches    a owl:ObjectProperty ; rdfs:label "touches (file)" .
+kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" .
+kg:references a owl:ObjectProperty ; rdfs:label "references" .
+
+kg:sourceSystem a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:sourceId     a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:contentHash  a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:uri          a owl:DatatypeProperty ; rdfs:range xsd:anyURI .
+kg:path         a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:login        a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:number       a owl:DatatypeProperty ; rdfs:range xsd:integer .
+kg:state        a owl:DatatypeProperty ; rdfs:range xsd:string .
+
+# --- tracker (Linear/Jira) spine ---
+kg:trackerKey   a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII-256"
+kg:trackerTeam  a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII"
+kg:description  a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:label        a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw tracker label
+kg:branchName   a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:inProject    a owl:ObjectProperty .          # issue -> project
+kg:relatedTo    a owl:ObjectProperty .          # issue <-> issue (Linear "related")
+kg:addressedBy  a owl:ObjectProperty .          # issue -> pr / commit (loop to code)
+
+######################  SEMANTIC PREDICATES  ######################
+
+# learning <-> learning / doc typed relations (recon §2.4 pre-built edge set)
+kg:supersedes     a owl:ObjectProperty ; rdfs:label "supersedes" .
+kg:supersededBy   a owl:ObjectProperty ; owl:inverseOf kg:supersedes .
+kg:duplicateOf    a owl:ObjectProperty .
+kg:recurrenceOf   a owl:ObjectProperty .
+kg:resolvedBy     a owl:ObjectProperty .          # learning -> pr/commit
+kg:regressedBy    a owl:ObjectProperty .          # learning -> pr/commit
+kg:filedAs        a owl:ObjectProperty .          # learning -> issue/ticket
+kg:relatedPr      a owl:ObjectProperty .          # learning -> pr
+kg:relatedSolution a owl:ObjectProperty .         # doc -> doc
+kg:affectsFile    a owl:ObjectProperty .          # learning -> file
+kg:affectsComponent a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw "file:func"
+kg:tagged         a owl:ObjectProperty ; rdfs:label "tagged" .        # node -> Topic
+kg:dependsOn      a owl:ObjectProperty .          # issue -> issue (todo dependencies)
+kg:aboutLearning  a owl:ObjectProperty .          # StatusUpdate -> Learning
+
+# learning scalar properties (normalized frontmatter core, recon §2.1)
+kg:learningId  a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:status      a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:category    a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:priority    a owl:DatatypeProperty ; rdfs:range xsd:string .   # P0..P3
+kg:severityLevel a owl:DatatypeProperty ; rdfs:range xsd:string . # critical/high/medium/low
+kg:symptom     a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:rootCause   a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:impact      a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:fix         a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:foundDate   a owl:DatatypeProperty ; rdfs:range xsd:date .
+kg:problemType a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:resolutionType a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:detail      a owl:DatatypeProperty ; rdfs:range xsd:string .  # long prose body (comment learnings)
+
+# retrieval
+kg:ofNode      a owl:ObjectProperty ; rdfs:domain kg:Chunk .
+kg:ordinal     a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:integer .
+kg:text        a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:string .
+kg:confidence  a owl:DatatypeProperty ; rdfs:range xsd:decimal .  # RDF-star annotation on extracted edges
