@@ -95,7 +95,16 @@ def kg_path(from_iri: str, to_iri: str, max_len: int = 4) -> dict:
 
 
 def main() -> None:
-    mcp.run()  # stdio transport
+    # Opt-in streamable-HTTP sidecar mode. When KG_HTTP is set, the server binds
+    # HTTP (loopback by default — privacy by placement, for an in-machine proxy
+    # such as an orchestrator's /mcp route) instead of stdio. Default is
+    # unchanged: stdio transport for local client registration (e.g. Claude Code).
+    if os.environ.get("KG_HTTP"):
+        mcp.settings.host = os.environ.get("KG_HTTP_HOST", "127.0.0.1")
+        mcp.settings.port = int(os.environ.get("KG_HTTP_PORT", "8765"))
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()  # stdio transport (default)
 
 
 if __name__ == "__main__":
