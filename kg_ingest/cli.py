@@ -11,7 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rdflib import Dataset, Graph
+from datetime import datetime, timezone
+
+from rdflib import Dataset, Graph, Literal
+from rdflib.namespace import DCTERMS, XSD
 from pyshacl import validate
 
 from . import iris, ontology, spine, semantic, snapshot
@@ -136,6 +139,17 @@ def main(argv=None) -> int:
         sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
                                          pipeline_ver=args.pipeline_ver)
         print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+
+    # ---- graph age stamp: when was this data current? ----
+    # Stamped at INGEST (not materialize) so the date lands in the committed
+    # snapshot parts and survives snapshot -> materialize — a deployed graph
+    # answers its own age via existing tools (kg_neighbors on the spine IRI).
+    # `set` keeps exactly one stamp; a stamp at materialize time would lie
+    # after every no-op redeploy.
+    stamp = Literal(datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    datatype=XSD.dateTime)
+    spine_g.set((iris.G_SPINE, DCTERMS.modified, stamp))
+    print(f"== graph age stamp: {stamp} ==")
 
     # ---- serialize named graphs (TriG preserves the spine/run split) ----
     trig_path = OUT_DIR / "graph.trig"
