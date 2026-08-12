@@ -49,6 +49,17 @@ SELECT ?iri ?title ?tag ?description WHERE {
 } ORDER BY ?iri
 """
 
+# Doc pages (AII-345): spine stamps dcterms:title + kg:detail on Doc nodes so
+# published documentation is findable by meaning ("what do the docs promise?").
+# Docs without a title (pre-AII-345 graphs) simply produce no card — additive.
+_DOC_Q = PREFIXES + """
+SELECT ?iri ?title ?path ?detail WHERE {
+  ?iri a kg:Doc ; dcterms:title ?title .
+  OPTIONAL { ?iri kg:path ?path }
+  OPTIONAL { ?iri kg:detail ?detail }
+} ORDER BY ?iri
+"""
+
 
 def _card(iri: str, ntype: str, title: str, extras: list[str], snippet: str) -> dict:
     parts = [title] + [e for e in extras if e]
@@ -91,5 +102,7 @@ def build_cards(store) -> list[dict]:
                                   drop_lc=_LIFECYCLE_LABELS).items():
         cards.append(_card(iri, "Issue", rec["title"],
                            [", ".join(rec["tags"])], rec["extra"]))
+    for iri, rec in _group_by_iri(store.select(_DOC_Q), "detail").items():
+        cards.append(_card(iri, "Doc", rec["title"], [], rec["extra"]))
     cards.sort(key=lambda c: c["iri"])
     return cards

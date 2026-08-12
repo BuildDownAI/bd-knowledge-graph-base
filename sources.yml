@@ -39,3 +39,11 @@ secondary_repos: []
 #  - slug: your-org/related-repo
 #    path: ../related-repo
 #    tier: secondary
+#
+#  Published docs repo (recommended): add the project's documentation repo as a
+#  secondary source so the KG can answer "what do the docs promise users?" and
+#  ground plans against published behavior (docs-drift detection). Doc pages
+#  (.md/.mdx/.rst/.txt) get title+snippet search cards automatically.
+#  - slug: your-org/docs
+#    path: ../docs
+#    tier: secondary
