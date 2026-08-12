@@ -33,7 +33,8 @@ Requires **Python 3.10+**.
 ```bash
 # 1. Create your repo from this template, then:
 ./setup.sh                      # venv + deps + build the graph
-                                # (defaults build a small self-graph of this repo)
+                                # (uses uv when installed, else venv + pip;
+                                #  defaults build a small self-graph of this repo)
 
 # 2. Point it at your project: edit sources.yml
 #    - namespace:  https://kg.<your-org>.dev/   (set once, up front)
@@ -42,7 +43,8 @@ Requires **Python 3.10+**.
 ./setup.sh --tracker --secondary
 
 # 3. Search from a terminal:
-PYTHONPATH=. ./.venv/bin/python -m kg_query.search "your first query"
+./.venv/bin/kg-query search "your first query"
+./.venv/bin/kg-query search --hybrid "a prose query"   # lexical+vector, RRF-fused
 
 # 4. Register the MCP server:
 cp .mcp.json.example .mcp.json  # fill in __REPO_DIR__ (absolute) + __PROJECT_SLUG__
@@ -50,9 +52,16 @@ cp .mcp.json.example .mcp.json  # fill in __REPO_DIR__ (absolute) + __PROJECT_SL
 ```
 
 The canonical refresh is `./setup.sh --tracker --secondary` (or
-`python -m kg_ingest.cli …`) — it rebuilds the graph **and** the vector index
+`kg-ingest build …`) — it rebuilds the graph **and** the vector index
 in one pass. The MCP server loads the graph once at startup: **restart your MCP
 client after a refresh**.
+
+Installing the project (editable, via `uv sync` or `pip install -e .`) puts two
+console scripts in the venv — **`kg-ingest`** (`build` / `embed` / `snapshot` /
+`materialize`) and **`kg-query`** (`search`, with `--semantic` / `--hybrid` /
+`--neighbors` / `--provenance` modes, and `serve` for the MCP server). The
+`python -m kg_ingest.<module>` / `python -m kg_query.<module>` forms still work,
+and `PYTHONPATH=.` is no longer needed anywhere.
 
 ## Layout
 
@@ -64,7 +73,8 @@ kg_query/              # store seam (rdflib|Stardog), read tools, hybrid search,
 docs/design/           # how the ingest works, semantic + hybrid search design
 learnings/             # the improvement loop's inbox (see CONTRIBUTING.md)
 tests/                 # mechanical validation: SHACL invariant, tools, search
-setup.sh               # one-shot: venv + deps + build
+pyproject.toml         # canonical dependency list (uv; uv.lock pins the resolve)
+setup.sh               # one-shot: venv (uv or pip) + deps + build
 ```
 
 ## Keeping a downstream KG current

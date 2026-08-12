@@ -1,0 +1,28 @@
+[project]
+name = "bd-knowledge-graph"
+version = "0.1.0"
+description = "Read-only project knowledge graph — spine + semantic layers, MCP query surface (BuildDown KG template)"
+requires-python = ">=3.10"
+dependencies = [
+    "rdflib>=7.0",
+    "pyshacl>=0.30",
+    "python-frontmatter>=1.1",
+    "mcp>=1.2,<2",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+    "fastembed>=0.3",
+]
+
+[project.scripts]
+kg-ingest = "kg_ingest.__main__:main"
+kg-query = "kg_query.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Installed editable by `uv sync` (and the setup.sh pip fallback) — the modules
+# locate ontology/, sources.yml, out/ and snapshot/ relative to __file__, so the
+# package must run from a checkout, not a site-packages copy.
+[tool.hatch.build.targets.wheel]
+packages = ["kg_ingest", "kg_query"]

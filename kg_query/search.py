@@ -2,10 +2,12 @@
 usable straight from a shell without an MCP client.
 
 Usage:
-  PYTHONPATH=. ./.venv/bin/python -m kg_query.search "webhook"
-  PYTHONPATH=. ./.venv/bin/python -m kg_query.search --limit 15 gap-fill
-  PYTHONPATH=. ./.venv/bin/python -m kg_query.search --neighbors <iri>
-  PYTHONPATH=. ./.venv/bin/python -m kg_query.search --provenance <iri>
+  kg-query search "webhook"            # or: python -m kg_query.search "webhook"
+  kg-query search --limit 15 gap-fill
+  kg-query search --semantic "flaky preview deploys"   # vector (embeddings sidecar)
+  kg-query search --hybrid "AII-256 retries"           # lexical + vector, RRF-fused
+  kg-query search --neighbors <iri>
+  kg-query search --provenance <iri>
 
 Backend follows KG_BACKEND (rdflib default). Read-only.
 """
@@ -36,16 +38,38 @@ def _print_search(res: dict) -> None:
     print()
 
 
+def _print_scored(res: dict, kind: str) -> None:
+    extra = " (degraded: lexical only — no embeddings sidecar)" if res.get("degraded") else ""
+    print(f"# kg_{kind}_search({res['query']!r}) — {res['count']} hit(s){extra}\n")
+    if res.get("error"):
+        print(f"  {res['error']}")
+        return
+    for r in res["results"]:
+        via = f"  via {'+'.join(r['matched_by'])}" if r.get("matched_by") else ""
+        typ = f"  ({r['type']})" if r.get("type") else ""
+        print(f"- [{r['score']:.4f}] {r['title']}{typ}{via}")
+        if r.get("snippet"):
+            print(f"    {r['snippet'][:200].strip()}")
+        print(f"    iri: {r['iri']}")
+    print()
+
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="kg_query.search")
+    ap = argparse.ArgumentParser(prog="kg-query search")
     ap.add_argument("term", nargs="*", help="search term(s)")
     ap.add_argument("--limit", type=int, default=10)
-    ap.add_argument("--neighbors", metavar="IRI", help="1-hop neighbors of a node")
-    ap.add_argument("--provenance", metavar="IRI", help="provenance of a node")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--semantic", action="store_true",
+                      help="vector search via the embeddings sidecar (paraphrase-tolerant)")
+    mode.add_argument("--hybrid", action="store_true",
+                      help="lexical + vector fused with RRF (best default for prose queries)")
+    mode.add_argument("--neighbors", metavar="IRI", help="1-hop neighbors of a node")
+    mode.add_argument("--provenance", metavar="IRI", help="provenance of a node")
     ap.add_argument("--json", action="store_true", help="raw JSON output")
     args = ap.parse_args(argv)
 
     store = get_store()
+    kind = None
     if args.neighbors:
         out = queries.kg_neighbors(store, args.neighbors, limit=args.limit)
     elif args.provenance:
@@ -54,10 +78,21 @@ def main(argv=None) -> int:
         term = " ".join(args.term).strip()
         if not term:
             ap.error("provide a search term (or --neighbors / --provenance IRI)")
-        out = queries.kg_search(store, term, limit=args.limit)
+        if args.semantic:
+            from . import semantic
+            kind = "semantic"
+            out = semantic.semantic_search(term, limit=args.limit)
+        elif args.hybrid:
+            from . import hybrid
+            kind = "hybrid"
+            out = hybrid.hybrid_search(store, term, limit=args.limit)
+        else:
+            out = queries.kg_search(store, term, limit=args.limit)
 
     if args.json:
         print(json.dumps(out, indent=2, default=str))
+    elif kind:
+        _print_scored(out, kind)
     elif "results" in out:
         _print_search(out)
     else:
