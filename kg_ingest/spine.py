@@ -19,7 +19,44 @@ PROV = Namespace("http://www.w3.org/ns/prov#")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
 FOAF = Namespace("http://xmlns.com/foaf/0.1/")
 
-DOC_SUFFIXES = {".md", ".rst", ".txt"}
+DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt"}
+
+# Doc pages get a real title + snippet at spine time (AII-345) so they can be
+# embedded as search cards — a Doc node that is only a path is invisible to
+# search. Read cap keeps ingest fast; extraction is best-effort and never fatal.
+_DOC_READ_CAP = 4096
+_DOC_SNIPPET_CHARS = 400
+
+
+def doc_meta(text: str, fallback_title: str) -> tuple[str, str]:
+    """Extract (title, snippet) from a doc page's leading text.
+
+    Title precedence: frontmatter `title:` -> first markdown H1 -> fallback
+    (filename). Snippet: the first non-heading body characters after
+    frontmatter, capped. Pure function, exported for tests.
+    """
+    lines = text.splitlines()
+    title = ""
+    body_start = 0
+    if lines and lines[0].strip() == "---":          # frontmatter block
+        for i in range(1, len(lines)):
+            s = lines[i].strip()
+            if s == "---":
+                body_start = i + 1
+                break
+            if s.lower().startswith("title:") and not title:
+                title = s[6:].strip().strip("'\"")
+    body: list[str] = []
+    for line in lines[body_start:]:
+        s = line.strip()
+        if not title and s.startswith("# "):
+            title = s[2:].strip()
+            continue
+        if s and not s.startswith("#"):
+            body.append(s)
+        if sum(len(b) for b in body) > _DOC_SNIPPET_CHARS:
+            break
+    return (title or fallback_title), " ".join(body)[:_DOC_SNIPPET_CHARS]
 
 
 def _git(repo_path: Path, *args: str) -> str:
@@ -79,10 +116,20 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         if not rel:
             continue
         suffix = Path(rel).suffix.lower()
-        node = iris.doc(repo_slug, rel) if suffix in DOC_SUFFIXES else iris.file(repo_slug, rel)
-        g.add((node, RDF.type, KG.Doc if suffix in DOC_SUFFIXES else KG.File))
+        is_doc = suffix in DOC_SUFFIXES
+        node = iris.doc(repo_slug, rel) if is_doc else iris.file(repo_slug, rel)
+        g.add((node, RDF.type, KG.Doc if is_doc else KG.File))
         g.add((node, KG.path, Literal(rel)))
         g.add((node, KG.partOf, repo_iri))
+        if is_doc:
+            try:
+                text = (repo_path / rel).read_text(errors="ignore")[:_DOC_READ_CAP]
+                title, snippet = doc_meta(text, Path(rel).stem)
+            except OSError:
+                title, snippet = Path(rel).stem, ""
+            g.add((node, DCTERMS.title, Literal(title[:300])))
+            if snippet:
+                g.add((node, KG.detail, Literal(snippet)))
         stats["files"] += 1
 
     # --- commits (capped, logged) ---
