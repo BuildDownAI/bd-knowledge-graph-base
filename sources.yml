@@ -13,10 +13,17 @@
 # Changing it after a graph exists changes every IRI — set it once, up front.
 namespace: https://example.org/kg/
 
+# ---- ORCHESTRATOR: app whose project list defines this KG's intended scope --
+# The bd-kg-refresh skill queries list_projects on this orchestrator's MCP and
+# reconciles sources.yml against it. Not consumed by the ingest pipeline itself
+# (no MCP calls, no tokens) — this key is for the skills-side reconcile step only.
+# orchestrator: https://your-orchestrator.example.com
+
 # ---- PRIMARY: the code repo whose git history + docs seed the graph ---------
 code_repo:
   slug: your-org/your-project           # GitHub owner/name (PRs pulled via `gh`)
   path: .                               # local clone, relative to this repo
+  # docs_url: https://docs.your-project.example.com  # optional: published documentation root
   doc_globs:                            # semantic-layer source docs (see kg_ingest/semantic.py)
     - docs/solutions/**/*.md            #   frontmatter "solutions"  -> kg:Learning
     - docs/adr/*.md                     #   architecture decisions   -> kg:Decision
@@ -39,6 +46,7 @@ secondary_repos: []
 #  - slug: your-org/related-repo
 #    path: ../related-repo
 #    tier: secondary
+#    # docs_url: https://docs.related.example.com  # optional: published documentation root
 #
 #  Published docs repo (recommended): add the project's documentation repo as a
 #  secondary source so the KG can answer "what do the docs promise users?" and
@@ -47,3 +55,4 @@ secondary_repos: []
 #  - slug: your-org/docs
 #    path: ../docs
 #    tier: secondary
+#    # docs_url: https://docs.your-project.example.com
