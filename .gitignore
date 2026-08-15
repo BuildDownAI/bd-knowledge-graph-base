@@ -6,3 +6,5 @@ __pycache__/
 .mcp.json
 .env
 .envrc
+.venv*/
+venv*/
