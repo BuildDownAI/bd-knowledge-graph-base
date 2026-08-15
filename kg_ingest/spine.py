@@ -55,7 +55,8 @@ def _link_tracker(g: Graph, node: URIRef, text: str, stats: dict) -> None:
 
 
 def add_spine(g: Graph, repo_path: Path, repo_slug: str,
-              max_commits: int | None = 500, max_prs: int = 60) -> dict:
+              max_commits: int | None = 500, max_prs: int = 60,
+              docs_url: str | None = None) -> dict:
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
     repo_path = Path(repo_path)
@@ -69,6 +70,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
     g.add((repo_iri, KG.sourceSystem, Literal("github")))
     g.add((repo_iri, KG.sourceId, Literal(repo_slug)))
     g.add((repo_iri, DCTERMS.title, Literal(repo_slug)))
+    if docs_url:
+        g.add((repo_iri, KG.docsUrl, Literal(docs_url)))
 
     # --- files ---
     for rel in _git(repo_path, "ls-files").splitlines():

@@ -47,9 +47,10 @@ def main(argv=None) -> int:
                          "(e.g. fastembed not installed / offline)")
     ap.add_argument("--pipeline-ver", default="0.1.0")
     args = ap.parse_args(argv)
+    from . import sources as _sources
+    _src_cfg = _sources.load()
     if not args.repo_slug:
-        from . import sources as _sources
-        args.repo_slug = (_sources.load().get("code_repo") or {}).get("slug") or "local/repo"
+        args.repo_slug = (_src_cfg.get("code_repo") or {}).get("slug") or "local/repo"
 
     repo_path = Path(args.repo).resolve()
     OUT_DIR.mkdir(exist_ok=True)
@@ -58,9 +59,11 @@ def main(argv=None) -> int:
     spine_g = ds.graph(iris.G_SPINE)
     max_commits = None if args.max_commits == 0 else args.max_commits
 
+    _code_repo_cfg = _src_cfg.get("code_repo") or {}
     print("== spine ingest ==")
     s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
-                              max_commits=max_commits, max_prs=args.max_prs)
+                              max_commits=max_commits, max_prs=args.max_prs,
+                              docs_url=_code_repo_cfg.get("docs_url"))
     for k, v in s_stats.items():
         print(f"   {k}: {v}")
 
@@ -90,9 +93,7 @@ def main(argv=None) -> int:
 
     # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
     if args.secondary:
-        from . import sources
-        cfg = sources.load()
-        for entry in (cfg.get("secondary_repos") or []):
+        for entry in (_src_cfg.get("secondary_repos") or []):
             # paths in sources.yml are relative to the KG repo root (this repo)
             p = Path(entry["path"])
             sec_path = p if p.is_absolute() else (OUT_DIR.parent / p).resolve()
@@ -102,7 +103,8 @@ def main(argv=None) -> int:
             sec_slug = entry["slug"]
             print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
             ss = spine.add_spine(spine_g, sec_path, sec_slug,
-                                 max_commits=max_commits, max_prs=args.max_prs)
+                                 max_commits=max_commits, max_prs=args.max_prs,
+                                 docs_url=entry.get("docs_url"))
             for k, v in ss.items():
                 print(f"   {k}: {v}")
             sec_fp = iris.content_hash(sec_slug)
