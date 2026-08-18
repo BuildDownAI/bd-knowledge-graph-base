@@ -126,8 +126,10 @@ def _get_robots(origin: str, config: CrawlConfig, session) -> urllib.robotparser
         resp = _get_response(f"{origin}/robots.txt", config, session)
         if resp.status_code == 200:
             rp.parse(resp.text.splitlines())
+        else:
+            rp.allow_all = True
     except Exception:
-        pass
+        rp.allow_all = True
     return rp
 
 

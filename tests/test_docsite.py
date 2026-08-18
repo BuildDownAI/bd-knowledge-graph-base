@@ -6,6 +6,7 @@ Run: PYTHONPATH=. ./.venv/bin/python tests/test_docsite.py
 import http.server
 import socketserver
 import threading
+import urllib.parse
 
 from kg_ingest.docsite import CrawlConfig, Page, Section, crawl_site, _parse_sitemap_xml
 
@@ -238,6 +239,60 @@ def test_exclude_pattern(base_url: str) -> None:
     print("PASS: test_exclude_pattern")
 
 
+def test_robots_missing_allows_crawl(base_url: str) -> None:
+    """When robots.txt returns 404, crawling is not blocked (allow all)."""
+    # Temporarily remove robots.txt from the fixture so the server returns 404
+    robots_entry = _FIXTURE_PAGES.pop("/robots.txt")
+    try:
+        cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=50)
+        pages = crawl_site(cfg)
+    finally:
+        _FIXTURE_PAGES["/robots.txt"] = robots_entry
+
+    assert len(pages) >= 5, (
+        f"Expected >=5 pages when robots.txt is missing (404), got {len(pages)}. "
+        "Sites without robots.txt must not be silently blocked."
+    )
+    print(f"PASS: test_robots_missing_allows_crawl ({len(pages)} pages)")
+
+
+def test_include_pattern(base_url: str) -> None:
+    """include glob restricts fetching to only matching paths.
+
+    Uses sitemap mode so all candidate URLs are known upfront and the include
+    filter is the only gate between discovery and fetching.
+    """
+    sitemap_content = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        b"<url><loc>" + base_url.encode() + b"/install.html</loc></url>"
+        b"<url><loc>" + base_url.encode() + b"/api.html</loc></url>"
+        b"<url><loc>" + base_url.encode() + b"/guide.html</loc></url>"
+        b"<url><loc>" + base_url.encode() + b"/faq.html</loc></url>"
+        b"</urlset>"
+    )
+    _FIXTURE_PAGES["/sitemap.xml"] = ("application/xml", sitemap_content)
+    try:
+        cfg = CrawlConfig(
+            root_url=base_url,
+            delay=0.0,
+            max_pages=50,
+            include=["/install.html", "/api.html"],
+        )
+        pages = crawl_site(cfg)
+    finally:
+        del _FIXTURE_PAGES["/sitemap.xml"]
+
+    urls = {urllib.parse.urlparse(p.url).path for p in pages}
+    # Both included pages must appear
+    assert "/install.html" in urls, f"/install.html missing from include crawl: {urls}"
+    assert "/api.html" in urls, f"/api.html missing from include crawl: {urls}"
+    # Pages in the sitemap but outside the include list must NOT appear
+    excluded = urls - {"/install.html", "/api.html"}
+    assert not excluded, f"Pages outside include list were crawled: {excluded}"
+    print(f"PASS: test_include_pattern ({len(pages)} pages)")
+
+
 def test_content_hash_deterministic(base_url: str) -> None:
     """Same HTML content produces identical content_hash across two crawls."""
     cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=1)
@@ -344,6 +399,8 @@ if __name__ == "__main__":
         test_robots_disallow(base_url)
         test_max_pages(base_url)
         test_exclude_pattern(base_url)
+        test_robots_missing_allows_crawl(base_url)
+        test_include_pattern(base_url)
         test_content_hash_deterministic(base_url)
         test_sitemap_crawl(base_url)
         print("\nALL TESTS PASSED")
