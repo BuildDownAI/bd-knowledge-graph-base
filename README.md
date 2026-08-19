@@ -71,7 +71,7 @@ ontology/              # kg.ttl (classes/predicates) + shapes.ttl (SHACL provena
 kg_ingest/             # spine + semantic + tracker ingesters, embeddings, snapshot writer
 kg_query/              # store seam (rdflib|Stardog), read tools, hybrid search, MCP server
 docs/design/           # how the ingest works, semantic + hybrid search design
-learnings/             # the improvement loop's inbox (see CONTRIBUTING.md)
+learnings/             # the improvement loop's inbox — accept / decline / defer, see CONTRIBUTING.md
 tests/                 # mechanical validation: SHACL invariant, tools, search
 pyproject.toml         # canonical dependency list (uv; uv.lock pins the resolve)
 setup.sh               # one-shot: venv (uv or pip) + deps + build
