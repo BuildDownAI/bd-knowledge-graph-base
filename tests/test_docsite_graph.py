@@ -40,15 +40,19 @@ def _build_fixture_graph() -> Graph:
     page_iri = iris.doc_page(_PAGE_URL)
     sec_iri = iris.doc_section(_PAGE_URL, _ANCHOR)
 
+    _fetched_at = Literal("2024-01-01T00:00:00Z", datatype=XSD.dateTime)
+
     g.add((site_iri, RDF.type, KG.DocSite))
     g.add((site_iri, KG.rootUrl, Literal(_ROOT)))
     g.add((site_iri, DCTERMS.title, Literal("Example Docs")))
+    g.add((site_iri, DCTERMS.modified, _fetched_at))
 
     g.add((page_iri, RDF.type, KG.DocPage))
     g.add((page_iri, KG.url, Literal(_PAGE_URL)))
     g.add((page_iri, DCTERMS.title, Literal("Guide")))
     g.add((page_iri, KG.contentHash, Literal("abc123")))
     g.add((page_iri, KG.partOf, site_iri))
+    g.add((page_iri, DCTERMS.modified, _fetched_at))
 
     g.add((sec_iri, RDF.type, KG.DocSection))
     g.add((sec_iri, KG.heading, Literal("Getting Started")))

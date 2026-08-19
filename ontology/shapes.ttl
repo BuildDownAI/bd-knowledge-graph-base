@@ -61,15 +61,17 @@ kg:ChunkShape a sh:NodeShape ;
 # so the provenance invariant (prov:wasDerivedFrom / prov:wasGeneratedBy) never fires.
 kg:DocSiteShape a sh:NodeShape ;
     sh:targetClass kg:DocSite ;
-    sh:property [ sh:path kg:rootUrl ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path dcterms:title ; sh:minCount 1 ; sh:datatype xsd:string ] .
+    sh:property [ sh:path kg:rootUrl ;        sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:modified ;  sh:minCount 1 ; sh:datatype xsd:dateTime ] .
 
 kg:DocPageShape a sh:NodeShape ;
     sh:targetClass kg:DocPage ;
-    sh:property [ sh:path kg:url ;         sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path dcterms:title ;  sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path kg:contentHash ; sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path kg:partOf ;      sh:minCount 1 ; sh:nodeKind sh:IRI ] .
+    sh:property [ sh:path kg:url ;            sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:contentHash ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:partOf ;         sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path dcterms:modified ;  sh:minCount 1 ; sh:datatype xsd:dateTime ] .
 
 kg:DocSectionShape a sh:NodeShape ;
     sh:targetClass kg:DocSection ;
