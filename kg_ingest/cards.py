@@ -7,6 +7,7 @@ from __future__ import annotations
 from kg_query.queries import PREFIXES
 
 SNIPPET_CHARS = 400
+DOCSECTION_SNIPPET_CHARS = 1200
 
 # Linear workflow-STATE labels (mirror kg_ingest/tracker.py::_LIFECYCLE_LABELS).
 # Excluded from Issue cards — they are pipeline state, not subject matter, and
@@ -61,6 +62,27 @@ SELECT ?iri ?title ?path ?detail WHERE {
 } ORDER BY ?iri
 """
 
+# KGB-4: crawled DocPage cards — preamble text (kg:detail) serves as the snippet.
+_DOCPAGE_Q = PREFIXES + """
+SELECT ?iri ?title ?detail WHERE {
+  ?iri a kg:DocPage ; dcterms:title ?title .
+  OPTIONAL { ?iri kg:detail ?detail }
+} ORDER BY ?iri
+"""
+
+# KGB-4: DocSection cards — one per section with a heading (level > 0).
+# Preamble sections (level == 0, heading == "") are never stored as DocSection
+# nodes, so no FILTER is needed here.
+_DOCSECTION_Q = PREFIXES + """
+SELECT ?iri ?page_title ?heading ?text WHERE {
+  ?iri a kg:DocSection ;
+       kg:heading ?heading ;
+       kg:text ?text ;
+       kg:partOf ?page .
+  ?page a kg:DocPage ; dcterms:title ?page_title .
+} ORDER BY ?iri
+"""
+
 
 def _card(iri: str, ntype: str, title: str, extras: list[str], snippet: str) -> dict:
     parts = [title] + [e for e in extras if e]
@@ -111,5 +133,12 @@ def build_cards(store) -> list[dict]:
                            [", ".join(rec["tags"])], rec["extra"]))
     for iri, rec in _group_by_iri(store.select(_DOC_Q), "detail").items():
         cards.append(_card(iri, "Doc", rec["title"], [], rec["extra"]))
+    for iri, rec in _group_by_iri(store.select(_DOCPAGE_Q), "detail").items():
+        cards.append(_card(iri, "DocPage", rec["title"], [], rec["extra"]))
+    for row in store.select(_DOCSECTION_Q):
+        title = f"{row['page_title']} \u203a {row['heading']}"
+        snip = (row.get("text") or "")[:DOCSECTION_SNIPPET_CHARS]
+        cards.append({"iri": row["iri"], "type": "DocSection", "title": title,
+                      "snippet": snip, "card_text": f"{title}\n{snip}" if snip else title})
     cards.sort(key=lambda c: c["iri"])
     return cards

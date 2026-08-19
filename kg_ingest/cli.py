@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from rdflib import Dataset, Graph, Literal
-from rdflib.namespace import DCTERMS, XSD
+from rdflib.namespace import DCTERMS, RDF, XSD
 from pyshacl import validate
 
 from . import iris, ontology, spine, semantic, snapshot
@@ -22,6 +23,95 @@ from . import iris, ontology, spine, semantic, snapshot
 ONTO_DIR = Path(__file__).resolve().parent.parent / "ontology"
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 SNAP_DIR = Path(__file__).resolve().parent.parent / "snapshot"
+
+
+def _heading_anchor(heading: str) -> str:
+    """Convert a heading string to a URL-safe anchor slug."""
+    s = heading.lower()
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[\s_]+", "-", s.strip())
+    return re.sub(r"-+", "-", s).strip("-")
+
+
+def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
+    """Crawl docs_sites entries and emit DocSite/DocPage/DocSection triples into spine_g."""
+    from .docsite import crawl_site, CrawlConfig
+
+    KG = iris.KG
+    total_pages = 0
+    total_sections = 0
+
+    for entry in docs_sites_cfg:
+        root_url = (entry.get("url") or "").rstrip("/")
+        if not root_url:
+            continue
+
+        config = CrawlConfig(
+            root_url=root_url,
+            max_depth=entry.get("max_depth", 4),
+            max_pages=entry.get("max_pages", 300),
+            include=list(entry.get("include") or []),
+            exclude=list(entry.get("exclude") or []),
+        )
+
+        print(f"== docsite crawl: {root_url} ==")
+        pages = crawl_site(config)
+
+        site_iri = iris.doc_site(root_url)
+        spine_g.add((site_iri, RDF.type, KG.DocSite))
+        spine_g.add((site_iri, KG.rootUrl, Literal(root_url)))
+        spine_g.add((site_iri, DCTERMS.title, Literal(root_url)))
+
+        repo_slug = entry.get("repo")
+        if repo_slug:
+            repo_iri = iris.repo(repo_slug)
+            spine_g.add((repo_iri, KG.docsUrl, Literal(root_url)))
+
+        fetched_ats: list[str] = []
+        for page in pages:
+            page_iri = iris.doc_page(page.url)
+            spine_g.add((page_iri, RDF.type, KG.DocPage))
+            spine_g.add((page_iri, KG.url, Literal(page.url)))
+            spine_g.add((page_iri, DCTERMS.title, Literal(page.title)))
+            spine_g.add((page_iri, KG.contentHash, Literal(page.content_hash)))
+            spine_g.add((page_iri, DCTERMS.modified,
+                         Literal(page.fetched_at, datatype=XSD.dateTime)))
+            spine_g.add((page_iri, KG.partOf, site_iri))
+            fetched_ats.append(page.fetched_at)
+
+            preamble_parts: list[str] = []
+            for section in page.sections:
+                if section.level == 0:
+                    if section.text:
+                        preamble_parts.append(section.text)
+                    continue
+
+                anchor = _heading_anchor(section.heading)
+                sec_iri = iris.doc_section(page.url, anchor)
+                if sec_iri is None:
+                    continue
+
+                spine_g.add((sec_iri, RDF.type, KG.DocSection))
+                spine_g.add((sec_iri, KG.heading, Literal(section.heading)))
+                spine_g.add((sec_iri, KG.level,
+                             Literal(section.level, datatype=XSD.integer)))
+                spine_g.add((sec_iri, KG.anchor, Literal(anchor)))
+                spine_g.add((sec_iri, KG.text, Literal(section.text)))
+                spine_g.add((sec_iri, KG.partOf, page_iri))
+                total_sections += 1
+
+            if preamble_parts:
+                spine_g.add((page_iri, KG.detail, Literal(" ".join(preamble_parts))))
+
+            total_pages += 1
+
+        site_fetched = (max(fetched_ats) if fetched_ats
+                        else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+        spine_g.add((site_iri, DCTERMS.modified,
+                     Literal(site_fetched, datatype=XSD.dateTime)))
+        print(f"   pages: {total_pages}, sections: {total_sections}")
+
+    return {"docsite_pages": total_pages, "docsite_sections": total_sections}
 
 
 def main(argv=None) -> int:
@@ -69,6 +159,14 @@ def main(argv=None) -> int:
                               docs_url=_code_repo_cfg.get("docs_url"))
     for k, v in s_stats.items():
         print(f"   {k}: {v}")
+
+    # ---- docs_sites: crawl published documentation into the spine graph ----
+    _docs_sites = _src_cfg.get("docs_sites") or []
+    if _docs_sites:
+        print("== docs_sites ingest ==")
+        ds_stats = _ingest_docs_sites(spine_g, _docs_sites)
+        for k, v in ds_stats.items():
+            print(f"   {k}: {v}")
 
     # deterministic run id from pipeline ver + corpus fingerprint
     fingerprint = iris.content_hash(
