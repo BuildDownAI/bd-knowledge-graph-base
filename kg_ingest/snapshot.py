@@ -237,10 +237,14 @@ def _load_union_from_trig(trig: Path) -> tuple[Graph, Dataset]:
     return union, ds
 
 
-if __name__ == "__main__":
+def main() -> None:
     root = Path(__file__).resolve().parent.parent
     union, ds = _load_union_from_trig(root / "out" / "graph.trig")
     stats = write_snapshot(union, root / "snapshot", ds)
     print(f"wrote snapshot/digest.md + {stats['part_files']} parts:")
     for t, n in stats["parts"].items():
         print(f"   parts/{t}.nt: {n}")
+
+
+if __name__ == "__main__":
+    main()

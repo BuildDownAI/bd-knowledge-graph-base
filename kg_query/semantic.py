@@ -40,7 +40,7 @@ def _load(npz_path: Path):
 def semantic_search(query: str, limit: int = 10, npz_path: Path = NPZ) -> dict:
     if not Path(npz_path).exists():
         return {"query": query,
-                "error": "no embeddings index — run `python -m kg_ingest.embed`",
+                "error": "no embeddings index — run `kg-ingest embed`",
                 "count": 0, "results": []}
     import numpy as np
 
