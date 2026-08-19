@@ -69,6 +69,11 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
 
         fetched_ats: list[str] = []
         for page in pages:
+            # Anchor slugs must be unique per page: repeated headings ("Required",
+            # "Required") would otherwise collide onto ONE DocSection IRI, merging
+            # two sections' triples and double-emitting cards. Site generators
+            # (Mintlify, GitHub) dedupe the same way: -2, -3, ... suffixes.
+            _seen_anchors: dict[str, int] = {}
             page_iri = iris.doc_page(page.url)
             spine_g.add((page_iri, RDF.type, KG.DocPage))
             spine_g.add((page_iri, KG.url, Literal(page.url)))
@@ -87,6 +92,11 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
                     continue
 
                 anchor = _heading_anchor(section.heading)
+                if anchor:
+                    n = _seen_anchors.get(anchor, 0) + 1
+                    _seen_anchors[anchor] = n
+                    if n > 1:
+                        anchor = f"{anchor}-{n}"
                 sec_iri = iris.doc_section(page.url, anchor)
                 if sec_iri is None:
                     continue

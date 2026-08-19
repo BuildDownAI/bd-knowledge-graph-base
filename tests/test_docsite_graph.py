@@ -192,6 +192,29 @@ def test_docsection_snippet_cap():
     assert len(sec_cards[0]["snippet"]) <= DOCSECTION_SNIPPET_CHARS
 
 
+def test_duplicate_heading_anchors_dedupe():
+    """Two same-slug headings on one page must yield DISTINCT DocSection IRIs
+    (-2 suffix, matching site-generator behaviour) — not one merged node."""
+    from kg_ingest.cli import _ingest_docs_sites
+    from unittest.mock import patch
+    from kg_ingest.docsite import Page, Section
+
+    page = Page(url=f"{_ROOT}/dup", title="Dup",
+                sections=[Section(heading="Required", level=2, text="first block"),
+                          Section(heading="Required", level=2, text="second block")],
+                fetched_at="2024-01-01T00:00:00Z", content_hash="h1")
+    g = Graph()
+    with patch("kg_ingest.docsite.crawl_site", return_value=[page]):
+        stats = _ingest_docs_sites(g, [{"url": _ROOT}])
+    secs = sorted(g.subjects(RDF.type, KG.DocSection))
+    assert stats["docsite_sections"] == 2
+    assert len(secs) == 2, f"expected 2 distinct section IRIs, got {len(secs)}"
+    anchors = sorted(str(g.value(s, KG.anchor)) for s in secs)
+    assert anchors == ["required", "required-2"], anchors
+    texts = {str(g.value(s, KG.text)) for s in secs}
+    assert texts == {"first block", "second block"}
+
+
 if __name__ == "__main__":
     test_triples_produced()
     print("PASS: triples produced")
@@ -211,3 +234,5 @@ if __name__ == "__main__":
     print("PASS: DocPage card")
     test_docsection_snippet_cap()
     print("PASS: DocSection snippet cap")
+    test_duplicate_heading_anchors_dedupe()
+    print("PASS: duplicate heading anchors dedupe")
