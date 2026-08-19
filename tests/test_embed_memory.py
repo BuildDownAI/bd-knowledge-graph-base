@@ -64,26 +64,34 @@ def _synthetic_cards(n: int):
 
 
 def main():
+    # The virtual-memory cap is best-effort: macOS refuses to lower RLIMIT_AS
+    # (ValueError), so the cap is enforced only where the platform allows it —
+    # in practice the Linux CI legs. The functional batching assertions below
+    # run everywhere regardless.
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     new_soft = VIRT_CAP
     if hard != resource.RLIM_INFINITY and hard < new_soft:
         new_soft = hard
-    resource.setrlimit(resource.RLIMIT_AS, (new_soft, hard))
+    capped = True
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (new_soft, hard))
+    except (ValueError, OSError):
+        capped = False
 
     try:
         with tempfile.TemporaryDirectory() as d:
             with patch("kg_ingest.cards.build_cards", return_value=_synthetic_cards(N_CARDS)):
                 meta = build_embeddings(_fake_store(), out_dir=Path(d))
     finally:
-        resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+        if capped:
+            resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
 
     assert meta["count"] == N_CARDS, meta
     expected_batches = (N_CARDS + BATCH_SIZE - 1) // BATCH_SIZE
     assert meta["batch_count"] == expected_batches, meta
-    print(
-        f"PASS: {N_CARDS} synthetic cards in {meta['batch_count']} batches "
-        f"within {new_soft // (1024 * 1024)} MB virtual cap"
-    )
+    cap_note = (f"within {new_soft // (1024 * 1024)} MB virtual cap" if capped
+                else "cap not settable on this platform (enforced in Linux CI)")
+    print(f"PASS: {N_CARDS} synthetic cards in {meta['batch_count']} batches {cap_note}")
 
 
 if __name__ == "__main__":
