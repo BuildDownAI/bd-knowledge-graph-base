@@ -1,9 +1,10 @@
 # learnings/ — the improvement loop's inbox
 
 Time-based, **sanitized** notes from teams operating downstream KGs, submitted as
-small PRs into `testing` (see [CONTRIBUTING.md](../CONTRIBUTING.md)). Accepted
-notes are triaged by priority; the base changes they suggest are implemented by
-priority.
+small PRs into `testing` (see [CONTRIBUTING.md](../CONTRIBUTING.md)). Every note gets
+one of three dispositions — **accept** (note merges + issue filed for the base change),
+**decline** (note merges, justification in the PR comment, no issue), or **defer**
+(note merges + Backlog issue). Full rules: CONTRIBUTING → *Evaluating a learning*.
 
 ## File convention
 

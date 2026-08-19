@@ -38,3 +38,25 @@ proprietary instance. PRs violating this are closed on sight.
 - `main` and `testing` are protected: PRs only, no force-pushes.
 - Never commit real `sources.yml` bindings, `out/`, or `snapshot/` data from a
   downstream KG to this repo.
+
+## Evaluating a learning — the three dispositions
+
+Every learning PR gets **one** of three dispositions from a maintainer, recorded as a PR
+comment so the decision is itself searchable (the KG ingests PR comments):
+
+| Disposition | What happens | Where it lives |
+|---|---|---|
+| **Accept** | The note merges into `testing` AND a tracker issue is filed in the base repo's team (KGB) for the suggested base change — the issue links the learning file; the PR comment links the issue. The base change is then built by priority like any other issue. | Note in `learnings/`, work in the tracker |
+| **Decline** | The note **still merges** — a pattern we considered is knowledge even when we reject its fix — but the PR comment states the justification plainly ("declined: <why>; what we'd do instead: <alternative>"). No issue is filed. | Note in `learnings/`, decision in the PR comment |
+| **Defer** | The note merges; an issue is filed in **Backlog** with the deferral reason and what would unblock it. | Note + a parked issue |
+
+Why declined notes still merge: the expensive part of a learning is the *diagnosis*, not
+the fix. Dropping the note because we reject the fix throws away the diagnosis, and the
+next team rediscovers it. Merging the note with a declined-with-reason comment gives the
+KG both the pattern and our reasoning.
+
+What never merges: a note that fails sanitization (CONTRIBUTING, above) — that is
+returned for a rewrite, not declined.
+
+Precedent: `learnings/2026/07/31-knowledge-graph-ai-implement.md` → **accepted** → KGB-6
+(dual-namespace CI gate).
