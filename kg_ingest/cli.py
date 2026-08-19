@@ -298,7 +298,7 @@ def main(argv=None) -> int:
             if e.get("skipped"):
                 print(f"== embeddings skipped: {e['skipped']} ==")
             else:
-                print(f"== embeddings -> {e['count']} cards ({e['model']}, dim {e['dim']}) ==")
+                print(f"== embeddings -> {e['count']} cards in {e.get('batch_count', '?')} batches ({e['model']}, dim {e['dim']}) ==")
         except ImportError as exc:
             print(f"== embeddings SKIPPED (fastembed not installed: {exc}); "
                   f"semantic/hybrid search will be stale — `pip install fastembed` "

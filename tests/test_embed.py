@@ -41,9 +41,10 @@ def main():
     assert (Path(d) / "embeddings.meta.json").exists()
     assert meta["model"] == MODEL and meta["dim"] == DIM
     assert meta["count"] == 2, meta
+    assert meta["batch_count"] >= 1, meta
     on_disk = json.loads((Path(d) / "embeddings.meta.json").read_text())
     assert on_disk == meta
-    print(f"PASS: build_embeddings -> {meta['count']} vectors dim {meta['dim']}")
+    print(f"PASS: build_embeddings -> {meta['count']} vectors dim {meta['dim']} batch_count {meta['batch_count']}")
 
 if __name__ == "__main__":
     main()
