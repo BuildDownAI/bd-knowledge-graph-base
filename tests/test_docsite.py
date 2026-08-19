@@ -406,3 +406,14 @@ if __name__ == "__main__":
         print("\nALL TESTS PASSED")
     finally:
         server.shutdown()
+
+
+def test_zero_width_stripped():
+    from kg_ingest.docsite import _clean
+    assert _clean("​Required") == "Required"
+    assert _clean("﻿Title​") == "Title"
+    print("PASS: test_zero_width_stripped")
+
+
+if __name__ == "__main__" and "test_zero_width_stripped" not in globals().get("_ran", []):
+    test_zero_width_stripped()

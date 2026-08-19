@@ -185,6 +185,16 @@ def _isolate_main_content(soup):
     return body
 
 
+
+# Zero-width characters site generators inject into anchor headings (Mintlify
+# prefixes each heading with U+200B). Harmless to display, but they corrupt
+# URL#anchor generation and lexical matching downstream — strip at extraction.
+_ZW = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
+
+
+def _clean(s: str) -> str:
+    return s.translate(_ZW).strip()
+
 def _extract_sections(main_el) -> list[Section]:
     from bs4 import NavigableString, Tag  # lazy
 
@@ -219,7 +229,7 @@ def _extract_sections(main_el) -> list[Section]:
             return
         if el.name in HEADING_TAGS:
             flush()
-            state["heading"] = el.get_text(strip=True)
+            state["heading"] = _clean(el.get_text(strip=True))
             state["level"] = HEADING_TAGS[el.name]
         elif el.name in BLOCK_TAGS:
             text = el.get_text(separator=" ", strip=True)
@@ -243,11 +253,11 @@ def _extract_page(html_bytes: bytes, url: str) -> Page:
     title = ""
     title_tag = soup.find("title")
     if title_tag:
-        title = title_tag.get_text(strip=True)
+        title = _clean(title_tag.get_text(strip=True))
     if not title:
         h1 = soup.find("h1")
         if h1:
-            title = h1.get_text(strip=True)
+            title = _clean(h1.get_text(strip=True))
     if not title:
         title = urllib.parse.urlparse(url).path.rstrip("/").split("/")[-1] or url
 
