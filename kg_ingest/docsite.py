@@ -185,6 +185,27 @@ def _isolate_main_content(soup):
     return body
 
 
+def _strip_code_gutters(el) -> None:
+    """Remove line-number gutter elements injected by common syntax highlighters.
+
+    Handles: Prism line-numbers plugin, highlight.js ln table, Rouge (Jekyll),
+    and Sphinx/Pygments linenos. Best-effort — unknown generators may still
+    include gutter text; document the limitation in the operator how-to.
+    """
+    # Prism: <span aria-hidden="true" class="line-numbers-rows">
+    for node in el.find_all(attrs={"class": "line-numbers-rows"}):
+        node.decompose()
+    # highlight.js: <td class="hljs-ln-n">
+    for node in el.find_all("td", attrs={"class": "hljs-ln-n"}):
+        node.decompose()
+    # Rouge (Jekyll): <td class="gl"> (gutter left)
+    for node in el.find_all("td", attrs={"class": "gl"}):
+        node.decompose()
+    # Sphinx/Pygments: <td class="linenos">
+    for node in el.find_all("td", attrs={"class": "linenos"}):
+        node.decompose()
+
+
 
 # Zero-width characters site generators inject into anchor headings (Mintlify
 # prefixes each heading with U+200B). Harmless to display, but they corrupt
@@ -262,6 +283,7 @@ def _extract_page(html_bytes: bytes, url: str) -> Page:
         title = urllib.parse.urlparse(url).path.rstrip("/").split("/")[-1] or url
 
     main = _isolate_main_content(soup)
+    _strip_code_gutters(main)
     sections = _extract_sections(main)
 
     return Page(

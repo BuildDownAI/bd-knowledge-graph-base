@@ -215,6 +215,73 @@ def test_duplicate_heading_anchors_dedupe():
     assert texts == {"first block", "second block"}
 
 
+def test_repoless_site_shacl_conforms():
+    """A docs_sites entry with no repo: produces a valid DocSite node (no kg:docsUrl required)."""
+    from kg_ingest.cli import _ingest_docs_sites
+    from unittest.mock import patch
+    from kg_ingest.docsite import Page, Section
+
+    _repoless_root = "https://third-party.example.com/docs"
+    page = Page(url=f"{_repoless_root}/intro", title="Intro",
+                sections=[Section(heading="Overview", level=2, text="Third-party overview.")],
+                fetched_at="2024-06-01T00:00:00Z", content_hash="abc")
+    g = Graph()
+    with patch("kg_ingest.docsite.crawl_site", return_value=[page]):
+        _ingest_docs_sites(g, [{"url": _repoless_root}])
+
+    site_iri = iris.doc_site(_repoless_root)
+    assert (site_iri, RDF.type, KG.DocSite) in g, "DocSite node missing"
+    assert not list(g.objects(site_iri, KG.documentsBranch)), \
+        "documentsBranch should not be set for repo-less entry without documents_branch key"
+
+    shapes = ontology.load("shapes.ttl")
+    onto = ontology.load("kg.ttl")
+    conforms, _, txt = validate(g + onto, shacl_graph=shapes,
+                                inference="rdfs", abort_on_first=False)
+    assert conforms, f"Repo-less DocSite should pass SHACL:\n{txt[:2000]}"
+
+
+def test_documents_branch_emitted():
+    """A docs_sites entry with documents_branch: testing emits exactly one kg:documentsBranch triple."""
+    from kg_ingest.cli import _ingest_docs_sites
+    from unittest.mock import patch
+    from kg_ingest.docsite import Page, Section
+
+    page = Page(url=f"{_ROOT}/intro", title="Intro",
+                sections=[Section(heading="Start", level=2, text="Getting started.")],
+                fetched_at="2024-06-01T00:00:00Z", content_hash="def")
+    g = Graph()
+    with patch("kg_ingest.docsite.crawl_site", return_value=[page]):
+        _ingest_docs_sites(g, [{"url": _ROOT, "documents_branch": "testing"}])
+
+    site_iri = iris.doc_site(_ROOT)
+    branches = list(g.objects(site_iri, KG.documentsBranch))
+    assert len(branches) == 1, f"Expected 1 kg:documentsBranch triple, got {branches}"
+    assert str(branches[0]) == "testing", f"Expected 'testing', got {branches[0]!r}"
+    # In RDF 1.1 plain string literals are equivalent to xsd:string; accept both.
+    assert branches[0].datatype in (XSD.string, None), \
+        f"documentsBranch must be a string literal, got datatype {branches[0].datatype}"
+
+    shapes = ontology.load("shapes.ttl")
+    onto = ontology.load("kg.ttl")
+    conforms, _, txt = validate(g + onto, shacl_graph=shapes,
+                                inference="rdfs", abort_on_first=False)
+    assert conforms, f"DocSite with documentsBranch should pass SHACL:\n{txt[:2000]}"
+
+
+def test_documents_branch_optional():
+    """A DocSite without documents_branch still conforms to SHACL (field is optional)."""
+    g = _build_fixture_graph()  # no documentsBranch added
+    shapes = ontology.load("shapes.ttl")
+    onto = ontology.load("kg.ttl")
+    conforms, _, txt = validate(g + onto, shacl_graph=shapes,
+                                inference="rdfs", abort_on_first=False)
+    assert conforms, f"DocSite without documentsBranch must still pass SHACL:\n{txt[:2000]}"
+    site_iri = iris.doc_site(_ROOT)
+    assert not list(g.objects(site_iri, KG.documentsBranch)), \
+        "Fixture graph must not have documentsBranch set"
+
+
 if __name__ == "__main__":
     test_triples_produced()
     print("PASS: triples produced")
@@ -236,3 +303,10 @@ if __name__ == "__main__":
     print("PASS: DocSection snippet cap")
     test_duplicate_heading_anchors_dedupe()
     print("PASS: duplicate heading anchors dedupe")
+    test_repoless_site_shacl_conforms()
+    print("PASS: repo-less site SHACL conforms")
+    test_documents_branch_emitted()
+    print("PASS: documents_branch triple emitted correctly")
+    test_documents_branch_optional()
+    print("PASS: documents_branch is optional (SHACL conforms without it)")
+    print("\nALL TESTS PASSED")

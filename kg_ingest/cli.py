@@ -52,6 +52,8 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
             max_pages=entry.get("max_pages", 300),
             include=list(entry.get("include") or []),
             exclude=list(entry.get("exclude") or []),
+            delay=entry.get("delay", 0.5),
+            user_agent=entry.get("user_agent", "KGB-DocBot/1.0"),
         )
 
         print(f"== docsite crawl: {root_url} ==")
@@ -61,6 +63,10 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
         spine_g.add((site_iri, RDF.type, KG.DocSite))
         spine_g.add((site_iri, KG.rootUrl, Literal(root_url)))
         spine_g.add((site_iri, DCTERMS.title, Literal(root_url)))
+
+        documents_branch = entry.get("documents_branch")
+        if documents_branch:
+            spine_g.add((site_iri, KG.documentsBranch, Literal(str(documents_branch))))
 
         repo_slug = entry.get("repo")
         if repo_slug:

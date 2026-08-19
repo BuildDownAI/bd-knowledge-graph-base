@@ -61,9 +61,10 @@ kg:ChunkShape a sh:NodeShape ;
 # so the provenance invariant (prov:wasDerivedFrom / prov:wasGeneratedBy) never fires.
 kg:DocSiteShape a sh:NodeShape ;
     sh:targetClass kg:DocSite ;
-    sh:property [ sh:path kg:rootUrl ;        sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path dcterms:title ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
-    sh:property [ sh:path dcterms:modified ;  sh:minCount 1 ; sh:datatype xsd:dateTime ] .
+    sh:property [ sh:path kg:rootUrl ;           sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;        sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:modified ;     sh:minCount 1 ; sh:datatype xsd:dateTime ] ;
+    sh:property [ sh:path kg:documentsBranch ;   sh:maxCount 1 ; sh:datatype xsd:string ] .
 
 kg:DocPageShape a sh:NodeShape ;
     sh:targetClass kg:DocPage ;
