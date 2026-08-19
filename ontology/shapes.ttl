@@ -56,3 +56,27 @@ kg:ChunkShape a sh:NodeShape ;
     sh:targetClass kg:Chunk ;
     sh:property [ sh:path kg:ofNode ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ] ;
     sh:property [ sh:path kg:text ;   sh:minCount 1 ; sh:datatype xsd:string ] .
+
+# Doc-site spine shapes (KGB-4). These classes are NOT subclasses of SemanticNode
+# so the provenance invariant (prov:wasDerivedFrom / prov:wasGeneratedBy) never fires.
+kg:DocSiteShape a sh:NodeShape ;
+    sh:targetClass kg:DocSite ;
+    sh:property [ sh:path kg:rootUrl ;        sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:modified ;  sh:minCount 1 ; sh:datatype xsd:dateTime ] .
+
+kg:DocPageShape a sh:NodeShape ;
+    sh:targetClass kg:DocPage ;
+    sh:property [ sh:path kg:url ;            sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:contentHash ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:partOf ;         sh:minCount 1 ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path dcterms:modified ;  sh:minCount 1 ; sh:datatype xsd:dateTime ] .
+
+kg:DocSectionShape a sh:NodeShape ;
+    sh:targetClass kg:DocSection ;
+    sh:property [ sh:path kg:heading ; sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:level ;   sh:minCount 1 ; sh:datatype xsd:integer ] ;
+    sh:property [ sh:path kg:anchor ;  sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:text ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path kg:partOf ;  sh:minCount 1 ; sh:nodeKind sh:IRI ] .

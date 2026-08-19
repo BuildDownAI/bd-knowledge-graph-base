@@ -105,6 +105,21 @@ def chunk(node_iri: URIRef, ordinal: int) -> URIRef:
     return URIRef(f"{node_iri}/chunk/{ordinal}")
 
 
+def doc_site(root_url: str) -> URIRef:
+    return URIRef(f"{KGR}docsite/{_seg(root_url)}")
+
+
+def doc_page(url: str) -> URIRef:
+    return URIRef(f"{KGR}docpage/{_seg(url)}")
+
+
+def doc_section(url: str, anchor: str) -> "URIRef | None":
+    """Return the DocSection IRI for url#anchor, or None for empty anchor (preamble)."""
+    if not anchor:
+        return None
+    return URIRef(f"{KGR}docpage/{_seg(url)}#{anchor}")
+
+
 def content_hash(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 

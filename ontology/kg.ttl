@@ -31,6 +31,12 @@ kg:Project      a owl:Class ; rdfs:label "Tracker project" .
 kg:Person       a owl:Class ; rdfs:subClassOf foaf:Agent ; rdfs:label "Person" .
 kg:BotAgent     a owl:Class ; rdfs:subClassOf kg:Person ; rdfs:label "Bot agent" .
 
+# Doc-site spine (KGB-4): crawled documentation, never subclasses of SemanticNode
+# so SemanticNodeShape provenance requirement never fires on these.
+kg:DocSite      a owl:Class ; rdfs:label "Documentation site" .
+kg:DocPage      a owl:Class ; rdfs:label "Documentation page" .
+kg:DocSection   a owl:Class ; rdfs:label "Documentation section" .
+
 ######################  SEMANTIC CLASSES  ######################
 
 kg:Learning     a owl:Class ; rdfs:label "Learning" .
@@ -82,6 +88,14 @@ kg:login        a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:number       a owl:DatatypeProperty ; rdfs:range xsd:integer .
 kg:state        a owl:DatatypeProperty ; rdfs:range xsd:string .
 
+# Doc-site spine predicates (KGB-4)
+kg:docsUrl  a owl:DatatypeProperty ; rdfs:range xsd:string .  # Repo -> documentation root URL
+kg:rootUrl  a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSite root URL
+kg:url      a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocPage full URL
+kg:anchor   a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSection heading anchor slug
+kg:heading  a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSection heading text
+kg:level    a owl:DatatypeProperty ; rdfs:range xsd:integer . # DocSection heading level (1–4)
+
 # --- tracker (Linear/Jira) spine ---
 kg:trackerKey   a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII-256"
 kg:trackerTeam  a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII"
@@ -128,5 +142,5 @@ kg:detail      a owl:DatatypeProperty ; rdfs:range xsd:string .  # long prose bo
 # retrieval
 kg:ofNode      a owl:ObjectProperty ; rdfs:domain kg:Chunk .
 kg:ordinal     a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:integer .
-kg:text        a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:string .
+kg:text        a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:confidence  a owl:DatatypeProperty ; rdfs:range xsd:decimal .  # RDF-star annotation on extracted edges

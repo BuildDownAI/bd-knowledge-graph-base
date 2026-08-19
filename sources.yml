@@ -56,3 +56,15 @@ secondary_repos: []
 #    path: ../docs
 #    tier: secondary
 #    # docs_url: https://docs.your-project.example.com
+
+# ---- DOCS SITES: crawl published documentation into the graph (KGB-4) -------
+# Each entry produces DocSite / DocPage / DocSection spine nodes. Sections get
+# individual search cards (type "DocSection") so users can find specific
+# passages by meaning. Requires `beautifulsoup4` and `requests` in the venv.
+# docs_sites:
+#  - url: https://docs.your-project.example.com  # documentation root URL (required)
+#    repo: your-org/your-project                  # optional: link site to a code repo
+#    max_depth: 4                                 # optional: BFS depth limit (default 4)
+#    max_pages: 300                               # optional: page cap (default 300)
+#    include: []                                  # optional: URL path globs to restrict crawl
+#    exclude: []                                  # optional: URL path globs to skip
