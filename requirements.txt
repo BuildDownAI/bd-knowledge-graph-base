@@ -1,7 +1,10 @@
+# pyproject.toml is the canonical dependency list (setup.sh installs from it,
+# via uv or pip -e). This file is kept for external consumers that pip install
+# the deps directly (e.g. the orchestrator image build). Keep the two in sync.
 rdflib>=7.0
 pyshacl>=0.30
 python-frontmatter>=1.1
-mcp>=1.2
+mcp>=1.2,<2
 requests>=2.31
 pyyaml>=6.0
 fastembed>=0.3

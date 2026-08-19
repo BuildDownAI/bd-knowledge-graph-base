@@ -42,10 +42,22 @@ SELECT ?iri ?title ?detail WHERE {
 # kg:tagged topics — so a label that never became a topic still reaches the card.
 # Lifecycle labels are filtered out in Python (_group_by_iri drop_lc).
 _ISSUE_Q = PREFIXES + """
-SELECT ?iri ?title ?tag ?description WHERE {
+SELECT ?iri ?title ?tag ?description ?key WHERE {
   ?iri a kg:Issue ; dcterms:title ?title .
   OPTIONAL { ?iri kg:label ?tag }
   OPTIONAL { ?iri kg:description ?description }
+  OPTIONAL { ?iri kg:trackerKey ?key }
+} ORDER BY ?iri
+"""
+
+# Doc pages (AII-345): spine stamps dcterms:title + kg:detail on Doc nodes so
+# published documentation is findable by meaning ("what do the docs promise?").
+# Docs without a title (pre-AII-345 graphs) simply produce no card — additive.
+_DOC_Q = PREFIXES + """
+SELECT ?iri ?title ?path ?detail WHERE {
+  ?iri a kg:Doc ; dcterms:title ?title .
+  OPTIONAL { ?iri kg:path ?path }
+  OPTIONAL { ?iri kg:detail ?detail }
 } ORDER BY ?iri
 """
 
@@ -70,7 +82,9 @@ def _group_by_iri(rows: list[dict], extra_field: str | None,
     by_iri: dict[str, dict] = {}
     for r in rows:
         rec = by_iri.setdefault(r["iri"], {"title": r.get("title", ""),
-                                           "tags": [], "extra": ""})
+                                           "tags": [], "extra": "", "key": ""})
+        if not rec["key"] and r.get("key"):
+            rec["key"] = r["key"]
         tag = r.get("tag")
         if (tag and (drop_lc is None or tag.lower() not in drop_lc)
                 and tag not in rec["tags"]):
@@ -89,7 +103,13 @@ def build_cards(store) -> list[dict]:
         cards.append(_card(iri, "Decision", rec["title"], [], rec["extra"]))
     for iri, rec in _group_by_iri(store.select(_ISSUE_Q), "description",
                                   drop_lc=_LIFECYCLE_LABELS).items():
-        cards.append(_card(iri, "Issue", rec["title"],
+        # Issue key in the card title (AII-340 finding): the exact-ID boost
+        # matches card TEXT, and an issue's own card otherwise never contains
+        # its own key — searching "PROJ-123" could not find PROJ-123 itself.
+        title = f"{rec['key']}: {rec['title']}" if rec.get("key") else rec["title"]
+        cards.append(_card(iri, "Issue", title,
                            [", ".join(rec["tags"])], rec["extra"]))
+    for iri, rec in _group_by_iri(store.select(_DOC_Q), "detail").items():
+        cards.append(_card(iri, "Doc", rec["title"], [], rec["extra"]))
     cards.sort(key=lambda c: c["iri"])
     return cards
