@@ -1,0 +1,59 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, testing]
+  pull_request:
+    branches: [main, testing]
+
+jobs:
+  test:
+    name: Tests (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: default-namespace
+            inject_namespace: false
+            namespace: https://example.org/kg/
+          - label: custom-namespace
+            inject_namespace: true
+            namespace: https://kg.acme.test/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache fastembed models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Inject custom namespace into sources.yml
+        if: matrix.inject_namespace
+        run: |
+          sed -i 's|namespace: https://example.org/kg/|namespace: ${{ matrix.namespace }}|' sources.yml
+          grep -q 'namespace: ${{ matrix.namespace }}' sources.yml \
+            || { echo "ERROR: namespace injection was a no-op — sources.yml format may have changed"; exit 1; }
+
+      - name: Run test suite
+        run: |
+          FAILED=0
+          for f in tests/test_*.py; do
+            echo "=== $f ==="
+            PYTHONPATH=. python "$f" || FAILED=$((FAILED + 1))
+          done
+          if [ "$FAILED" -gt 0 ]; then
+            echo "FAILED: $FAILED test file(s) failed"
+            exit 1
+          fi
+          echo "ALL TESTS PASSED"
