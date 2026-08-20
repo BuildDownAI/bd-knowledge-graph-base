@@ -81,10 +81,8 @@ secondary_repos: []
 #    delay: 1.0                                           # be a guest: slower than own-site default
 #    user_agent: "KGB-DocBot/1.0 (+https://github.com/your-org/your-kg)"
 
-# Proof-of-concept: Click (Pallets) public OSS docs — repo-less third-party entry.
-# Demonstrates KGB-5 foreign-site ingest: no repo:, polite delay, hard page cap.
-docs_sites:
-  - url: https://click.palletsprojects.com/en/stable/
-    max_pages: 50
-    delay: 1.0
-    user_agent: "KGB-DocBot/1.0 (+https://github.com/your-org/your-kg)"
+# The base repo is a TEMPLATE: it ships with NO active docs_sites so a fresh
+# derivative never crawls a foreign site by default. The third-party shape was
+# proven live against click.palletsprojects.com (Read the Docs / Sphinx) during
+# the KGB-5 smoke — see the PR #20 smoke report. Derivatives configure their
+# own entries (see docs/design/docs-sites.md).

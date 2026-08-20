@@ -112,6 +112,16 @@ _CODE_GUTTER = b"""<html><head><title>Code Example</title></head>
 </article>
 </body></html>"""
 
+
+# Sphinx-style heading with a headerlink pilcrow that must be stripped
+_SPHINX_HEADERLINK = b"""<html><head><title>Sphinx Page</title></head>
+<body>
+<main>
+  <h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">\xc2\xb6</a></h2>
+  <p>Getting going quickly.</p>
+</main>
+</body></html>"""
+
 _FIXTURE_PAGES: dict[str, tuple[str, bytes]] = {
     "/robots.txt":        ("text/plain",  _ROBOTS),
     "/":                  ("text/html",   _ROOT),
@@ -128,6 +138,7 @@ _FIXTURE_PAGES: dict[str, tuple[str, bytes]] = {
     "/mkdocs.html":       ("text/html",   _MKDOCS),
     "/no-h1.html":        ("text/html",   _NO_H1),
     "/code.html":         ("text/html",   _CODE_GUTTER),
+    "/sphinx.html":       ("text/html",   _SPHINX_HEADERLINK),
 }
 
 
@@ -402,6 +413,39 @@ def test_sitemap_crawl(base_url: str) -> None:
     print(f"PASS: test_sitemap_crawl ({len(pages)} pages via sitemap)")
 
 
+def test_sparse_sitemap_falls_back_to_links(base_url: str) -> None:
+    """A sitemap listing ONLY the root (Read-the-Docs style) must not suppress
+    link-walking — linked pages are still discovered (KGB-5 smoke finding)."""
+    sitemap_content = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        b"<url><loc>" + base_url.encode() + b"/</loc></url>"
+        b"</urlset>"
+    )
+    _FIXTURE_PAGES["/sitemap.xml"] = ("application/xml", sitemap_content)
+    try:
+        cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=10)
+        pages = crawl_site(cfg)
+    finally:
+        del _FIXTURE_PAGES["/sitemap.xml"]
+
+    urls = {p.url for p in pages}
+    assert len(pages) > 1, f"sparse sitemap suppressed BFS: only {urls}"
+    assert any("install" in u for u in urls), f"linked install.html not discovered: {urls}"
+    print(f"PASS: test_sparse_sitemap_falls_back_to_links ({len(pages)} pages)")
+
+
+def test_sphinx_headerlink_stripped(base_url: str) -> None:
+    """Sphinx headerlink pilcrows are removed from heading text."""
+    cfg = CrawlConfig(root_url=f"{base_url}/sphinx.html", delay=0.0, max_pages=1)
+    pages = crawl_site(cfg)
+    assert len(pages) == 1
+    headings = {s.heading for s in pages[0].sections if s.level > 0}
+    assert "Quickstart" in headings, f"clean heading missing: {headings}"
+    assert not any("\u00b6" in h for h in headings), f"pilcrow leaked: {headings}"
+    print("PASS: test_sphinx_headerlink_stripped")
+
+
 def test_lazy_import() -> None:
     """Importing kg_ingest.docsite must not import bs4 at module level."""
     import importlib
@@ -500,6 +544,8 @@ if __name__ == "__main__":
         test_include_pattern(base_url)
         test_content_hash_deterministic(base_url)
         test_sitemap_crawl(base_url)
+        test_sparse_sitemap_falls_back_to_links(base_url)
+        test_sphinx_headerlink_stripped(base_url)
         test_mkdocs_content_isolation(base_url)
         test_missing_h1_fallback(base_url)
         test_line_number_gutter_stripped(base_url)

@@ -204,6 +204,10 @@ def _strip_code_gutters(el) -> None:
     # Sphinx/Pygments: <td class="linenos">
     for node in el.find_all("td", attrs={"class": "linenos"}):
         node.decompose()
+    # Sphinx headerlink pilcrows: <a class="headerlink" href="#...">¶</a>
+    # inside every heading — decorative permalink, corrupts heading text/cards.
+    for node in el.find_all("a", attrs={"class": "headerlink"}):
+        node.decompose()
 
 
 
@@ -327,42 +331,38 @@ def crawl_site(config: CrawlConfig) -> list[Page]:
             return False
         return robots.can_fetch(config.user_agent, url)
 
-    if sitemap_pages:
-        for url in sitemap_pages:
-            if len(pages) >= config.max_pages:
-                break
-            if url in seen or not _ok(url):
-                continue
+    # Sitemap URLs are SEEDS for the BFS, never an exclusive list. Some
+    # generators publish complete per-page sitemaps (Mintlify); others list
+    # only one URL per version root (Read the Docs) — treating those as
+    # complete crawls a single page and silently misses the site (found live
+    # on click.palletsprojects.com during the KGB-5 smoke). Link-walking from
+    # every seed fills the gap; a complete sitemap simply yields no new links.
+    queue: deque[tuple[str, int]] = deque()
+    seen.add(root)
+    queue.append((root, 0))
+    for url in sitemap_pages:
+        if url not in seen:
             seen.add(url)
-            try:
-                resp = _get_response(url, config, session)
-                if resp.status_code == 200 and "html" in resp.headers.get("content-type", ""):
-                    pages.append(_extract_page(resp.content, url))
-            except Exception:
-                pass
-            time.sleep(config.delay)
-    else:
-        queue: deque[tuple[str, int]] = deque([(root, 0)])
-        seen.add(root)
-        while queue and len(pages) < config.max_pages:
-            url, depth = queue.popleft()
-            if not _ok(url):
+            queue.append((url, 0))
+    while queue and len(pages) < config.max_pages:
+        url, depth = queue.popleft()
+        if not _ok(url):
+            continue
+        try:
+            resp = _get_response(url, config, session)
+            if resp.status_code != 200:
                 continue
-            try:
-                resp = _get_response(url, config, session)
-                if resp.status_code != 200:
-                    continue
-                if "html" not in resp.headers.get("content-type", ""):
-                    continue
-                page = _extract_page(resp.content, url)
-                pages.append(page)
-                time.sleep(config.delay)
-                if depth < config.max_depth:
-                    for link in _extract_links(resp.content, url):
-                        if link not in seen and _same_site(link, root):
-                            seen.add(link)
-                            queue.append((link, depth + 1))
-            except Exception:
-                pass
+            if "html" not in resp.headers.get("content-type", ""):
+                continue
+            page = _extract_page(resp.content, url)
+            pages.append(page)
+            time.sleep(config.delay)
+            if depth < config.max_depth:
+                for link in _extract_links(resp.content, url):
+                    if link not in seen and _same_site(link, root):
+                        seen.add(link)
+                        queue.append((link, depth + 1))
+        except Exception:
+            pass
 
     return pages
