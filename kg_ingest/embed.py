@@ -16,9 +16,14 @@ OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 MODEL = "BAAI/bge-small-en-v1.5"
 DIM = 384
 CARD_FIELDS = "title + tags/labels + <=400-char snippet"
+# Embed in fixed-size slices so peak memory is one pre-allocated output array
+# plus one batch of ONNX buffers, independent of total card count.
+# Tune here if the image memory envelope changes; 64 × bge-small is ~10 MB/batch.
+BATCH_SIZE = 64
 
 
 def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
+    import gc
     import numpy as np
     from fastembed import TextEmbedding
     from .cards import build_cards
@@ -32,15 +37,34 @@ def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
         return {"model": MODEL, "dim": DIM, "count": 0,
                 "built_from_quads": n_quads, "card_fields": CARD_FIELDS,
                 "skipped": "no Learning/Decision/Issue cards in the graph yet"}
+
+    # Query n_quads before releasing the graph handle.
+    n_quads = int(store.select("SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")[0]["n"])
+    # Free the rdflib graph; cards contain everything needed for embedding.
+    del store
+    gc.collect()
+
     texts = [c["card_text"] for c in cards]
+    n = len(texts)
+
+    # Instantiate once to avoid reloading ONNX weights on every batch.
     model = TextEmbedding(model_name=MODEL)
-    vecs = np.asarray(list(model.embed(texts)), dtype=np.float32)
+
+    # Pre-allocate the full output array; fill BATCH_SIZE rows at a time so the
+    # only live allocation beyond this array is a single batch of intermediate buffers.
+    vecs = np.zeros((n, DIM), dtype=np.float32)
+    batch_count = 0
+    for start in range(0, n, BATCH_SIZE):
+        batch = texts[start:start + BATCH_SIZE]
+        vecs[start:start + len(batch)] = np.asarray(list(model.embed(batch)), dtype=np.float32)
+        batch_count += 1
+
     vecs /= (np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12)
     assert vecs.shape[1] == DIM, (vecs.shape, DIM)
 
-    n_quads = int(store.select("SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")[0]["n"])
     meta = {"model": MODEL, "dim": int(vecs.shape[1]), "count": len(cards),
-            "built_from_quads": n_quads, "card_fields": CARD_FIELDS}
+            "built_from_quads": n_quads, "card_fields": CARD_FIELDS,
+            "batch_count": batch_count}
 
     out_dir.mkdir(parents=True, exist_ok=True)
     np.savez(out_dir / "embeddings.npz",
@@ -57,8 +81,12 @@ def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
 def main() -> None:
     from kg_query.store import get_store
     meta = build_embeddings(get_store())
-    print(f"embedded {meta['count']} cards ({meta['model']}, dim {meta['dim']}) "
-          f"-> {OUT_DIR}/embeddings.npz + embeddings.meta.json")
+    if meta.get("skipped"):
+        print(f"embeddings skipped: {meta['skipped']}")
+    else:
+        print(f"embedded {meta['count']} cards in {meta['batch_count']} batches "
+              f"({meta['model']}, dim {meta['dim']}) "
+              f"-> {OUT_DIR}/embeddings.npz + embeddings.meta.json")
 
 
 if __name__ == "__main__":
