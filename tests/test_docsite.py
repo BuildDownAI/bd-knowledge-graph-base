@@ -75,6 +75,53 @@ _SITEMAP = b"""<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>__BASE__/api.html</loc></url>
 </urlset>"""
 
+# MkDocs-style fixture: content inside <div class="md-content"><article>, no nav in content
+_MKDOCS = b"""<html><head><title>MkDocs Page</title></head>
+<body>
+<nav class="md-nav">Nav link One Nav link Two</nav>
+<div class="md-content">
+  <article>
+    <h2>Configuration</h2>
+    <p>Configure the tool using a YAML file.</p>
+    <h2>Advanced Usage</h2>
+    <p>Advanced patterns for power users.</p>
+  </article>
+</div>
+<footer class="md-footer">Footer content Bravo</footer>
+</body></html>"""
+
+# Page with no h1 — title must fall back to <title>; sections from h2+
+_NO_H1 = b"""<html><head><title>Page Without H1</title></head>
+<body>
+<main>
+  <h2>First Section</h2>
+  <p>Content of the first section without an h1.</p>
+  <h2>Second Section</h2>
+  <p>Content of the second section.</p>
+</main>
+</body></html>"""
+
+# Prism line-numbers gutter: digits must NOT appear in section text after stripping
+_CODE_GUTTER = b"""<html><head><title>Code Example</title></head>
+<body>
+<article>
+  <h2>Example</h2>
+  <pre class="language-python line-numbers"><span aria-hidden="true" class="line-numbers-rows"><span>1</span><span>2</span></span>def hello():
+    return world
+  </pre>
+</article>
+</body></html>"""
+
+
+# Sphinx-style heading with a headerlink pilcrow that must be stripped
+_SPHINX_HEADERLINK = b"""<html><head><title>Sphinx Page</title></head>
+<body>
+<main>
+  <h2>Quickstart<a class="headerlink" href="#quickstart" title="Link to this heading">\xc2\xb6</a></h2>
+  <p>Getting going quickly.</p>
+</main>
+</body></html>"""
+
 _FIXTURE_PAGES: dict[str, tuple[str, bytes]] = {
     "/robots.txt":        ("text/plain",  _ROBOTS),
     "/":                  ("text/html",   _ROOT),
@@ -88,6 +135,10 @@ _FIXTURE_PAGES: dict[str, tuple[str, bytes]] = {
     "/troubleshoot.html": ("text/html",   _SIMPLE("Troubleshooting")),
     "/changelog/v1.html": ("text/html",   _CHANGELOG),
     "/private/secret.html": ("text/html", _PRIVATE),
+    "/mkdocs.html":       ("text/html",   _MKDOCS),
+    "/no-h1.html":        ("text/html",   _NO_H1),
+    "/code.html":         ("text/html",   _CODE_GUTTER),
+    "/sphinx.html":       ("text/html",   _SPHINX_HEADERLINK),
 }
 
 
@@ -362,6 +413,39 @@ def test_sitemap_crawl(base_url: str) -> None:
     print(f"PASS: test_sitemap_crawl ({len(pages)} pages via sitemap)")
 
 
+def test_sparse_sitemap_falls_back_to_links(base_url: str) -> None:
+    """A sitemap listing ONLY the root (Read-the-Docs style) must not suppress
+    link-walking — linked pages are still discovered (KGB-5 smoke finding)."""
+    sitemap_content = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        b"<url><loc>" + base_url.encode() + b"/</loc></url>"
+        b"</urlset>"
+    )
+    _FIXTURE_PAGES["/sitemap.xml"] = ("application/xml", sitemap_content)
+    try:
+        cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=10)
+        pages = crawl_site(cfg)
+    finally:
+        del _FIXTURE_PAGES["/sitemap.xml"]
+
+    urls = {p.url for p in pages}
+    assert len(pages) > 1, f"sparse sitemap suppressed BFS: only {urls}"
+    assert any("install" in u for u in urls), f"linked install.html not discovered: {urls}"
+    print(f"PASS: test_sparse_sitemap_falls_back_to_links ({len(pages)} pages)")
+
+
+def test_sphinx_headerlink_stripped(base_url: str) -> None:
+    """Sphinx headerlink pilcrows are removed from heading text."""
+    cfg = CrawlConfig(root_url=f"{base_url}/sphinx.html", delay=0.0, max_pages=1)
+    pages = crawl_site(cfg)
+    assert len(pages) == 1
+    headings = {s.heading for s in pages[0].sections if s.level > 0}
+    assert "Quickstart" in headings, f"clean heading missing: {headings}"
+    assert not any("\u00b6" in h for h in headings), f"pilcrow leaked: {headings}"
+    print("PASS: test_sphinx_headerlink_stripped")
+
+
 def test_lazy_import() -> None:
     """Importing kg_ingest.docsite must not import bs4 at module level."""
     import importlib
@@ -384,6 +468,63 @@ def test_lazy_import() -> None:
     print("PASS: test_lazy_import")
 
 
+def test_mkdocs_content_isolation(base_url: str) -> None:
+    """MkDocs-style <article> inside a wrapper div: nav/footer stripped, article content kept."""
+    cfg = CrawlConfig(root_url=f"{base_url}/mkdocs.html", delay=0.0, max_pages=1)
+    pages = crawl_site(cfg)
+
+    assert len(pages) == 1
+    page = pages[0]
+    all_text = " ".join(s.text for s in page.sections)
+
+    assert "One" not in all_text, f"nav text leaked: {all_text!r}"
+    assert "Two" not in all_text, f"nav text leaked: {all_text!r}"
+    assert "Bravo" not in all_text, f"footer text leaked: {all_text!r}"
+
+    headings = {s.heading for s in page.sections}
+    assert "Configuration" in headings, f"Expected 'Configuration' section; got {headings}"
+    assert "Advanced Usage" in headings, f"Expected 'Advanced Usage' section; got {headings}"
+    assert "YAML" in all_text, f"Article content missing: {all_text!r}"
+    print("PASS: test_mkdocs_content_isolation")
+
+
+def test_missing_h1_fallback(base_url: str) -> None:
+    """Page with no h1: title from <title> tag; sections extracted from h2+ headings."""
+    cfg = CrawlConfig(root_url=f"{base_url}/no-h1.html", delay=0.0, max_pages=1)
+    pages = crawl_site(cfg)
+
+    assert len(pages) == 1
+    page = pages[0]
+
+    assert page.title == "Page Without H1", f"Expected title from <title>, got {page.title!r}"
+
+    headings = {s.heading for s in page.sections if s.level > 0}
+    assert "First Section" in headings, f"h2 sections missing; got {headings}"
+    assert "Second Section" in headings, f"h2 sections missing; got {headings}"
+    print("PASS: test_missing_h1_fallback")
+
+
+def test_line_number_gutter_stripped(base_url: str) -> None:
+    """Prism line-numbers gutter digits are not included in section text."""
+    cfg = CrawlConfig(root_url=f"{base_url}/code.html", delay=0.0, max_pages=1)
+    pages = crawl_site(cfg)
+
+    assert len(pages) == 1
+    page = pages[0]
+    all_text = " ".join(s.text for s in page.sections)
+
+    # The fixture code has no digits; any digit means gutter leaked through
+    import re
+    bare_digits = re.findall(r"(?<!\w)\d+(?!\w)", all_text)
+    assert not bare_digits, (
+        f"Line-number gutter digits leaked into section text: {bare_digits!r}\n"
+        f"Full section text: {all_text!r}"
+    )
+    assert "hello" in all_text or "world" in all_text, \
+        f"Actual code content missing after gutter strip: {all_text!r}"
+    print("PASS: test_line_number_gutter_stripped")
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -403,6 +544,11 @@ if __name__ == "__main__":
         test_include_pattern(base_url)
         test_content_hash_deterministic(base_url)
         test_sitemap_crawl(base_url)
+        test_sparse_sitemap_falls_back_to_links(base_url)
+        test_sphinx_headerlink_stripped(base_url)
+        test_mkdocs_content_isolation(base_url)
+        test_missing_h1_fallback(base_url)
+        test_line_number_gutter_stripped(base_url)
         print("\nALL TESTS PASSED")
     finally:
         server.shutdown()

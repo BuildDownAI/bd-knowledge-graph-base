@@ -57,14 +57,32 @@ secondary_repos: []
 #    tier: secondary
 #    # docs_url: https://docs.your-project.example.com
 
-# ---- DOCS SITES: crawl published documentation into the graph (KGB-4) -------
+# ---- DOCS SITES: crawl published documentation into the graph (KGB-4/KGB-5) -
 # Each entry produces DocSite / DocPage / DocSection spine nodes. Sections get
 # individual search cards (type "DocSection") so users can find specific
 # passages by meaning. Requires `beautifulsoup4` and `requests` in the venv.
+#
+# OWN SITE EXAMPLE (with a code-repo link):
 # docs_sites:
-#  - url: https://docs.your-project.example.com  # documentation root URL (required)
-#    repo: your-org/your-project                  # optional: link site to a code repo
-#    max_depth: 4                                 # optional: BFS depth limit (default 4)
-#    max_pages: 300                               # optional: page cap (default 300)
-#    include: []                                  # optional: URL path globs to restrict crawl
-#    exclude: []                                  # optional: URL path globs to skip
+#  - url: https://docs.your-project.example.com/latest/  # crawl root — pick the version area matching this branch
+#    repo: your-org/your-project                          # optional: link site to a code repo node
+#    documents_branch: testing                            # optional: code branch this docs version documents
+#                                                         #   e.g. /latest/ area -> testing branch; /stable/ -> main
+#    max_depth: 4                                         # optional: BFS depth limit (default 4)
+#    max_pages: 300                                       # optional: page cap (default 300)
+#    include: []                                          # optional: URL path globs to restrict crawl
+#    exclude: []                                          # optional: URL path globs to skip
+#    delay: 0.5                                           # optional: seconds between requests (default 0.5)
+#    user_agent: "KGB-DocBot/1.0"                         # optional: HTTP User-Agent string
+#
+# THIRD-PARTY SITE EXAMPLE (no repo link; stay polite — honor robots, keep delays, cap pages):
+#  - url: https://click.palletsprojects.com/en/stable/    # permissively-crawlable OSS docs
+#    max_pages: 50                                        # hard cap for foreign sites
+#    delay: 1.0                                           # be a guest: slower than own-site default
+#    user_agent: "KGB-DocBot/1.0 (+https://github.com/your-org/your-kg)"
+
+# The base repo is a TEMPLATE: it ships with NO active docs_sites so a fresh
+# derivative never crawls a foreign site by default. The third-party shape was
+# proven live against click.palletsprojects.com (Read the Docs / Sphinx) during
+# the KGB-5 smoke — see the PR #20 smoke report. Derivatives configure their
+# own entries (see docs/design/docs-sites.md).
