@@ -46,6 +46,24 @@ def _fixture_store():
     return RdflibStore(os.path.join(d, "g.trig")), Path(d)
 
 
+def test_hybrid_npz_from_env():
+    """hybrid_search with no npz_path arg respects KG_NPZ env var via resolve_npz()."""
+    store, _ = _fixture_store()
+    semantic._index = None
+    saved = {k: os.environ.pop(k, None) for k in ("KG_NPZ", "KG_DATA_DIR")}
+    os.environ["KG_NPZ"] = "/nonexistent/env-driven.npz"
+    try:
+        r = hybrid.hybrid_search(store, "dedup")  # no npz_path — resolved from env
+        assert r["degraded"] is True, r
+        assert r["results"], r
+    finally:
+        os.environ.pop("KG_NPZ", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+    print("PASS: hybrid_search default respects KG_NPZ env var")
+
+
 def test_degraded_lexical_only():
     store, _ = _fixture_store()
     semantic._index = None
@@ -95,6 +113,7 @@ def test_partial_id_no_false_boost():
 
 
 def main():
+    test_hybrid_npz_from_env()
     test_degraded_lexical_only()
     if not HAVE:
         print("SKIP: fastembed not installed — vector arm not exercised"); return

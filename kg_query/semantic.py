@@ -7,11 +7,26 @@ matrix-vector product; no ANN index needed at this scale). Read-only.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 NPZ = Path(__file__).resolve().parent.parent / "out" / "embeddings.npz"
 
 _index = None  # lazy singleton
+
+
+def resolve_npz() -> Path:
+    """Resolve the vectors path from the environment at call time.
+
+    Precedence (highest first): KG_NPZ, KG_DATA_DIR/embeddings.npz, module default.
+    """
+    kg_npz = os.environ.get("KG_NPZ")
+    if kg_npz:
+        return Path(kg_npz)
+    kg_data_dir = os.environ.get("KG_DATA_DIR")
+    if kg_data_dir:
+        return Path(kg_data_dir) / "embeddings.npz"
+    return NPZ
 
 
 class _Index:

@@ -26,7 +26,9 @@ def _rrf(rank: int) -> float:
 
 
 def hybrid_search(store, query: str, limit: int = 10,
-                  npz_path: Path = semantic.NPZ) -> dict:
+                  npz_path: Path | None = None) -> dict:
+    if npz_path is None:
+        npz_path = semantic.resolve_npz()
     lex = queries.kg_search(store, query, limit)
     sem = semantic.semantic_search(query, limit, npz_path=npz_path)
     degraded = "error" in sem
