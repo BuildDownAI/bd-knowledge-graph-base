@@ -52,7 +52,7 @@ def test_resolve_npz_data_dir():
     os.environ["KG_DATA_DIR"] = d
     try:
         assert semantic.resolve_npz() == Path(d) / "embeddings.npz", semantic.resolve_npz()
-        print("PASS: KG_DATA_DIR -> {dir}/embeddings.npz")
+        print(f"PASS: KG_DATA_DIR -> {d}/embeddings.npz")
     finally:
         os.environ.pop("KG_DATA_DIR", None)
         for k, v in saved.items():
