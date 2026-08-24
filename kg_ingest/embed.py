@@ -50,7 +50,7 @@ def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path = SNAP_D
     _stamp_rows = store.select(
         f"SELECT ?stamp WHERE {{ <{_g_spine}> <{str(DCTERMS.modified)}> ?stamp }}"
     )
-    age_stamp = _stamp_rows[0]["stamp"] if _stamp_rows else ""
+    age_stamp = _stamp_rows[0].get("stamp", "") if _stamp_rows else ""
 
     # Free the rdflib graph; cards contain everything needed for embedding.
     del store
