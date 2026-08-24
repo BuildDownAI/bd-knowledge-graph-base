@@ -3,6 +3,8 @@
 Reads the graph, builds one compact index card per Learning/Decision/Issue
 (kg_ingest.cards), embeds each with fastembed (BAAI/bge-small-en-v1.5, ONNX, no
 torch), and writes out/embeddings.npz + out/embeddings.meta.json (both gitignored).
+Also writes snapshot/embeddings.npz (compressed) and snapshot/embeddings.meta.json
+(tracked by git) so consumers can copy the vectors without re-running inference.
 fastembed/numpy are imported lazily so the core ingest never depends on them.
 
 Run: python -m kg_ingest.embed
@@ -13,6 +15,7 @@ import json
 from pathlib import Path
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
+SNAP_DIR = Path(__file__).resolve().parent.parent / "snapshot"
 MODEL = "BAAI/bge-small-en-v1.5"
 DIM = 384
 CARD_FIELDS = "title + tags/labels + <=400-char snippet"
@@ -22,7 +25,7 @@ CARD_FIELDS = "title + tags/labels + <=400-char snippet"
 BATCH_SIZE = 64
 
 
-def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
+def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path = SNAP_DIR) -> dict:
     import gc
     import numpy as np
     from fastembed import TextEmbedding
@@ -38,8 +41,17 @@ def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
                 "built_from_quads": n_quads, "card_fields": CARD_FIELDS,
                 "skipped": "no Learning/Decision/Issue cards in the graph yet"}
 
-    # Query n_quads before releasing the graph handle.
+    # Query n_quads and age_stamp before releasing the graph handle.
     n_quads = int(store.select("SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")[0]["n"])
+    # RdflibStore flattens named graphs to a union, so query without GRAPH clause.
+    from . import iris as _iris
+    from rdflib.namespace import DCTERMS
+    _g_spine = str(_iris.G_SPINE)
+    _stamp_rows = store.select(
+        f"SELECT ?stamp WHERE {{ <{_g_spine}> <{str(DCTERMS.modified)}> ?stamp }}"
+    )
+    age_stamp = _stamp_rows[0].get("stamp", "") if _stamp_rows else ""
+
     # Free the rdflib graph; cards contain everything needed for embedding.
     del store
     gc.collect()
@@ -64,17 +76,27 @@ def build_embeddings(store, out_dir: Path = OUT_DIR) -> dict:
 
     meta = {"model": MODEL, "dim": int(vecs.shape[1]), "count": len(cards),
             "built_from_quads": n_quads, "card_fields": CARD_FIELDS,
-            "batch_count": batch_count}
+            "batch_count": batch_count, "age_stamp": age_stamp}
+
+    arrays = dict(
+        vectors=vecs,
+        iris=np.array([c["iri"] for c in cards]),
+        types=np.array([c["type"] for c in cards]),
+        titles=np.array([c["title"] for c in cards]),
+        snippets=np.array([c["snippet"] for c in cards]),
+        meta=json.dumps(meta),
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    np.savez(out_dir / "embeddings.npz",
-             vectors=vecs,
-             iris=np.array([c["iri"] for c in cards]),
-             types=np.array([c["type"] for c in cards]),
-             titles=np.array([c["title"] for c in cards]),
-             snippets=np.array([c["snippet"] for c in cards]),
-             meta=json.dumps(meta))
+    np.savez(out_dir / "embeddings.npz", **arrays)
     (out_dir / "embeddings.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+    # Compressed committed snapshot — consumers copy this instead of re-running inference.
+    # String columns (snippets) compress especially well; ~2.5 MB vs 12 MB uncompressed.
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(snapshot_dir / "embeddings.npz", **arrays)
+    (snapshot_dir / "embeddings.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
     return meta
 
 

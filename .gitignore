@@ -8,3 +8,6 @@ __pycache__/
 .envrc
 .venv*/
 venv*/
+# Committed embeddings artifacts — kept in snapshot/ so consumers skip inference.
+!snapshot/embeddings.npz
+!snapshot/embeddings.meta.json
