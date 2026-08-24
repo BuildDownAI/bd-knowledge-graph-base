@@ -80,4 +80,8 @@ def get_store() -> Store:
             user=os.environ.get("KG_STARDOG_USER", "admin"),
             password=os.environ.get("KG_STARDOG_PASSWORD", "admin"),
         )
-    return RdflibStore(os.environ.get("KG_TRIG", DEFAULT_TRIG))
+    trig = os.environ.get("KG_TRIG")
+    if trig is None:
+        data_dir = os.environ.get("KG_DATA_DIR")
+        trig = Path(data_dir) / "graph.trig" if data_dir else DEFAULT_TRIG
+    return RdflibStore(trig)

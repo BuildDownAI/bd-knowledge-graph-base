@@ -5,6 +5,11 @@ or Stardog via KG_BACKEND=stardog). NO write tools — Phase 1 is read-only.
 
 Run (stdio):  python -m kg_query.server
 Backend:      KG_BACKEND=rdflib|stardog  (+ KG_STARDOG_* / KG_TRIG)
+Data path:    KG_DATA_DIR sets the default directory for both the graph (graph.trig)
+              and the vectors (embeddings.npz).  KG_TRIG overrides the graph file;
+              KG_NPZ overrides the vectors file.  KG_TRIG and KG_NPZ each win over
+              KG_DATA_DIR.  KG_DATA_DIR has no effect on the Stardog backend for
+              graph queries (Stardog connects over HTTP, not the filesystem).
 """
 from __future__ import annotations
 
@@ -48,7 +53,7 @@ def kg_semantic_search(query: str, limit: int = 10) -> dict:
     kg_provenance for full content. Requires the embeddings sidecar (build with
     `python -m kg_ingest.embed`); returns a friendly error if absent. Read-only.
     """
-    return semantic.semantic_search(query, limit)
+    return semantic.semantic_search(query, limit, npz_path=semantic.resolve_npz())
 
 
 @mcp.tool()
@@ -63,7 +68,7 @@ def kg_hybrid_search(query: str, limit: int = 10) -> dict:
     Prefer this over `kg_search`/`kg_semantic_search` unless you specifically need
     exact-only or vector-only. Read-only.
     """
-    return hybrid.hybrid_search(store(), query, limit)
+    return hybrid.hybrid_search(store(), query, limit, npz_path=semantic.resolve_npz())
 
 
 @mcp.tool()

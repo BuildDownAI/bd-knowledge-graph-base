@@ -35,6 +35,48 @@ FIXTURE_RAW = """
 """
 FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
+def test_resolve_npz_no_vars():
+    saved = {k: os.environ.pop(k, None) for k in ("KG_NPZ", "KG_DATA_DIR")}
+    try:
+        assert semantic.resolve_npz() == semantic.NPZ, semantic.resolve_npz()
+        print("PASS: no env vars -> default NPZ path")
+    finally:
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_resolve_npz_data_dir():
+    d = tempfile.mkdtemp()
+    saved = {k: os.environ.pop(k, None) for k in ("KG_NPZ", "KG_DATA_DIR")}
+    os.environ["KG_DATA_DIR"] = d
+    try:
+        assert semantic.resolve_npz() == Path(d) / "embeddings.npz", semantic.resolve_npz()
+        print(f"PASS: KG_DATA_DIR -> {d}/embeddings.npz")
+    finally:
+        os.environ.pop("KG_DATA_DIR", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_resolve_npz_kg_npz_wins():
+    d = tempfile.mkdtemp()
+    alt = "/tmp/alt.npz"
+    saved = {k: os.environ.pop(k, None) for k in ("KG_NPZ", "KG_DATA_DIR")}
+    os.environ["KG_DATA_DIR"] = d
+    os.environ["KG_NPZ"] = alt
+    try:
+        assert semantic.resolve_npz() == Path(alt), semantic.resolve_npz()
+        print("PASS: KG_NPZ beats KG_DATA_DIR")
+    finally:
+        os.environ.pop("KG_DATA_DIR", None)
+        os.environ.pop("KG_NPZ", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
 def test_missing_sidecar():
     r = semantic.semantic_search("anything", npz_path=Path("/nonexistent/x.npz"))
     assert r["results"] == [] and "error" in r, r
@@ -54,6 +96,9 @@ def test_ranks_dedup_first():
     print(f"PASS: paraphrase ranked dedup first (score {top['score']})")
 
 def main():
+    test_resolve_npz_no_vars()
+    test_resolve_npz_data_dir()
+    test_resolve_npz_kg_npz_wins()
     test_missing_sidecar()
     if not HAVE:
         print("SKIP: fastembed not installed — build/query path not exercised"); return

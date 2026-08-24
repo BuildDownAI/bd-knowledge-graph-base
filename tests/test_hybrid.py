@@ -12,7 +12,7 @@ except ImportError:
     HAVE = False
 
 from kg_query import hybrid, semantic
-from kg_query.store import RdflibStore
+from kg_query.store import RdflibStore, get_store
 from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.embed import build_embeddings
 
@@ -44,6 +44,63 @@ def _fixture_store():
     d = tempfile.mkdtemp()
     Path(d, "g.trig").write_text(FIXTURE)
     return RdflibStore(os.path.join(d, "g.trig")), Path(d)
+
+
+def test_get_store_data_dir():
+    """get_store() with KG_DATA_DIR loads graph.trig from that directory (AC2 graph side)."""
+    d = tempfile.mkdtemp()
+    Path(d, "graph.trig").write_text(FIXTURE)
+    saved = {k: os.environ.pop(k, None) for k in ("KG_TRIG", "KG_DATA_DIR")}
+    os.environ["KG_DATA_DIR"] = d
+    try:
+        store = get_store()
+        rows = store.select("SELECT * WHERE { ?s ?p ?o } LIMIT 1")
+        assert rows, f"expected at least one row from get_store() with KG_DATA_DIR={d}"
+        print("PASS: KG_DATA_DIR -> graph.trig loaded by get_store()")
+    finally:
+        os.environ.pop("KG_DATA_DIR", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_get_store_kg_trig_wins():
+    """KG_TRIG overrides KG_DATA_DIR when resolving the graph file (AC4)."""
+    d_trig = tempfile.mkdtemp()
+    Path(d_trig, "graph.trig").write_text(FIXTURE)
+    d_data = tempfile.mkdtemp()  # intentionally empty — raises if get_store() reads it
+    saved = {k: os.environ.pop(k, None) for k in ("KG_TRIG", "KG_DATA_DIR")}
+    os.environ["KG_TRIG"] = str(Path(d_trig) / "graph.trig")
+    os.environ["KG_DATA_DIR"] = d_data
+    try:
+        store = get_store()
+        rows = store.select("SELECT * WHERE { ?s ?p ?o } LIMIT 1")
+        assert rows, "expected at least one row; get_store() should have used KG_TRIG"
+        print("PASS: KG_TRIG beats KG_DATA_DIR in get_store()")
+    finally:
+        os.environ.pop("KG_TRIG", None)
+        os.environ.pop("KG_DATA_DIR", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+
+
+def test_hybrid_npz_from_env():
+    """hybrid_search with no npz_path arg respects KG_NPZ env var via resolve_npz()."""
+    store, _ = _fixture_store()
+    semantic._index = None
+    saved = {k: os.environ.pop(k, None) for k in ("KG_NPZ", "KG_DATA_DIR")}
+    os.environ["KG_NPZ"] = "/nonexistent/env-driven.npz"
+    try:
+        r = hybrid.hybrid_search(store, "dedup")  # no npz_path — resolved from env
+        assert r["degraded"] is True, r
+        assert r["results"], r
+    finally:
+        os.environ.pop("KG_NPZ", None)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+    print("PASS: hybrid_search default respects KG_NPZ env var")
 
 
 def test_degraded_lexical_only():
@@ -95,6 +152,9 @@ def test_partial_id_no_false_boost():
 
 
 def main():
+    test_get_store_data_dir()
+    test_get_store_kg_trig_wins()
+    test_hybrid_npz_from_env()
     test_degraded_lexical_only()
     if not HAVE:
         print("SKIP: fastembed not installed — vector arm not exercised"); return
