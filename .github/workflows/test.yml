@@ -41,7 +41,7 @@ jobs:
       - name: Inject custom namespace into sources.yml
         if: matrix.inject_namespace
         run: |
-          sed -i 's|namespace: https://example.org/kg/|namespace: ${{ matrix.namespace }}|' sources.yml
+          sed -i 's|^namespace: .*|namespace: ${{ matrix.namespace }}|' sources.yml
           grep -q 'namespace: ${{ matrix.namespace }}' sources.yml \
             || { echo "ERROR: namespace injection was a no-op — sources.yml format may have changed"; exit 1; }
 
