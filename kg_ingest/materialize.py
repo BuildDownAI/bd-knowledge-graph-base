@@ -17,13 +17,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
 from pathlib import Path
 
 from rdflib import Dataset
+from rdflib.namespace import DCTERMS
 
 ROOT = Path(__file__).resolve().parent.parent
-SNAP_PARTS = ROOT / "snapshot" / "parts"
-OUT_DIR = ROOT / "out"
+SNAP_DIR = ROOT / "snapshot"
+SNAP_PARTS = SNAP_DIR / "parts"
+OUT_DIR = ROOT / "out"  # KGB-10 will make this configurable
 
 
 def materialize_graph(parts_dir: Path = SNAP_PARTS, out_dir: Path = OUT_DIR) -> int:
@@ -45,6 +49,58 @@ def materialize_graph(parts_dir: Path = SNAP_PARTS, out_dir: Path = OUT_DIR) -> 
     return len(g)
 
 
+def _graph_age_stamp(parts_dir: Path) -> str:
+    """Return the dcterms:modified stamp on the spine IRI from the committed parts."""
+    from . import iris
+    ds = Dataset()
+    g = ds.graph()
+    for part in sorted(parts_dir.glob("*.nt")):
+        g.parse(part, format="nt")
+    val = g.value(iris.G_SPINE, DCTERMS.modified)
+    return str(val) if val is not None else ""
+
+
+def copy_embeddings(
+    snap_dir: Path = SNAP_DIR,
+    out_dir: Path = OUT_DIR,
+    parts_dir: Path = SNAP_PARTS,
+) -> None:
+    """Copy committed snapshot/embeddings.* to out/, verifying the age stamp.
+
+    Exits non-zero (naming the relevant file and stamps) if the committed meta
+    does not match the materialized graph's dcterms:modified, or if committed
+    files are missing. Does not import fastembed.
+    """
+    snap_npz = snap_dir / "embeddings.npz"
+    snap_meta = snap_dir / "embeddings.meta.json"
+
+    if not snap_npz.exists():
+        raise SystemExit(
+            f"[materialize] missing committed embeddings: {snap_npz}\n"
+            f"Run a full ingest (python -m kg_ingest.cli --repo ...) to generate them."
+        )
+    if not snap_meta.exists():
+        raise SystemExit(
+            f"[materialize] missing committed embeddings meta: {snap_meta}\n"
+            f"Run a full ingest (python -m kg_ingest.cli --repo ...) to generate them."
+        )
+
+    committed_stamp = json.loads(snap_meta.read_text()).get("age_stamp", "")
+    graph_stamp = _graph_age_stamp(parts_dir)
+
+    if graph_stamp != committed_stamp:
+        raise SystemExit(
+            f"[materialize] embedding stamp mismatch in {snap_meta}\n"
+            f"  expected (graph dcterms:modified): {graph_stamp!r}\n"
+            f"  found    (file age_stamp):         {committed_stamp!r}\n"
+            f"Run a full ingest to regenerate."
+        )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(snap_npz, out_dir / "embeddings.npz")
+    shutil.copy2(snap_meta, out_dir / "embeddings.meta.json")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Reconstitute out/graph.trig from committed snapshot parts."
@@ -63,10 +119,8 @@ def main(argv=None) -> int:
         print("[materialize] --no-embed: semantic search will run degraded (lexical-only)")
         return 0
 
-    from . import embed
-
-    embed.main()
-    print("[materialize] embeddings rebuilt")
+    copy_embeddings()
+    print("[materialize] embeddings copied from snapshot/")
     return 0
 
 
