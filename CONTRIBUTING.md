@@ -1,7 +1,38 @@
 # Contributing — the learnings loop
 
 This base improves through **learning PRs** from teams operating downstream KGs.
-The loop is deliberately small:
+The loop is deliberately small. Code PRs follow the same path.
+
+## Contributor License Agreement — required
+
+**Before we can merge your pull request — a learning note or code alike — you need
+to sign a Contributor License Agreement.** It's a one-time signature that covers
+everything you contribute to BuildDown projects in future.
+
+| You are… | Sign this |
+|---|---|
+| An individual contributing your own work | [Individual CLA](legal/ICLA.md) |
+| Contributing on behalf of an employer, or using employer time or equipment | Your employer signs the [Corporate CLA](legal/CCLA.md), **and** you sign the Individual CLA |
+
+When you open your first PR, the CLA bot will comment with a link. The status check blocks merge until it's signed.
+
+**You keep ownership of your work.** The CLA is a licence, not an assignment — you can keep using, licensing and distributing your contribution however you like, including in competing projects.
+
+**BuildDown gets a broad licence, including the right to relicense.** Section 4 of the CLA lets us distribute your contribution under a commercial or proprietary licence, change the project's licence in future, offer the project under several licences at once, and include your contribution in paid products and hosted services — without asking again and without paying you. If that's not acceptable, please don't sign and don't contribute.
+
+**Check your employment agreement first.** If you're employed as a developer, it may assign to your employer everything you write — including on your own time and equipment. Section 5.2 of the Individual CLA asks you to represent that you're entitled to grant the licence. If your employer owns your work, we need a Corporate CLA from them instead.
+
+Questions: **[PLACEHOLDER: cla@builddown.ai]**
+
+## Setting up
+
+```bash
+./setup.sh          # uv sync (or venv + pip -e .), then build the graph from sources.yml
+```
+
+Python 3.10+ is required. `setup.sh` prefers `uv` (a `.venv` from `pyproject.toml` / `uv.lock`) and falls back to `venv` + `pip`. Run the tests with `PYTHONPATH=. python tests/test_*.py`, and mind the **dual-namespace test gate** documented below — both legs must be green before a PR can merge.
+
+**Disclose third-party and AI-generated material.** If your contribution includes material under a third-party licence, or was generated in substantial part by an AI system, mark it and say so in the PR description (CLA Sections 5.4 and 5.5). This is a disclosure requirement, not a prohibition.
 
 ## Submitting a learning
 
