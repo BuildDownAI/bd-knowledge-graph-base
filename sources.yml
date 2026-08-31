@@ -86,3 +86,20 @@ secondary_repos: []
 # proven live against click.palletsprojects.com (Read the Docs / Sphinx) during
 # the KGB-5 smoke — see the PR #20 smoke report. Derivatives configure their
 # own entries (see docs/design/docs-sites.md).
+
+# ---- MCP SOURCES: ingest MCP-served resources into the graph (KGB-12) --------
+# Each entry produces McpSource / DocPage / DocSection spine nodes. Resources are
+# enumerated via resources/list (with cursor pagination) and read via resources/read.
+# Content is heading-chunked like docsite pages; zero LLM. Requires `mcp>=1.2`.
+#
+# STDIO SERVER EXAMPLE:
+# mcp_sources:
+#  - name: "My Docs Vault"                     # human label → McpSource title
+#    command: ["python", "-m", "my_mcp_server"] # launch command for stdio MCP server
+#    max_resources: 200                         # optional: resource cap (default 200)
+#
+# GBRAIN-STYLE MARKDOWN VAULT (flat directory of .md files served over MCP):
+# mcp_sources:
+#  - name: "GBrain Vault"
+#    command: ["npx", "@gbrain/mcp-server", "--vault", "/path/to/vault"]
+#    max_resources: 500

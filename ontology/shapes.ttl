@@ -81,3 +81,10 @@ kg:DocSectionShape a sh:NodeShape ;
     sh:property [ sh:path kg:anchor ;  sh:minCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path kg:text ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path kg:partOf ;  sh:minCount 1 ; sh:nodeKind sh:IRI ] .
+
+# MCP-source spine shape (KGB-12). Distinct class from DocSite — not retrofitted.
+kg:McpSourceShape a sh:NodeShape ;
+    sh:targetClass kg:McpSource ;
+    sh:property [ sh:path kg:mcpServer ;     sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:title ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path dcterms:modified ; sh:minCount 1 ; sh:datatype xsd:dateTime ] .
