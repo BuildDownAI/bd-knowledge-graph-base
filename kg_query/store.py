@@ -46,6 +46,41 @@ class RdflibStore(Store):
         return rows
 
 
+class OxigraphStore(Store):
+    """In-process store backed by Oxigraph; flattens quads into default graph for SPARQL parity."""
+
+    def __init__(self, trig_path: str | Path = DEFAULT_TRIG):
+        import pyoxigraph
+
+        # Load the TriG into a staging store (populates named graphs).
+        staging = pyoxigraph.Store()
+        staging.load(path=str(trig_path), format=pyoxigraph.RdfFormat.TRIG)
+
+        # Flatten all quads into the default graph so SPARQL sees a union view.
+        self._store = pyoxigraph.Store()
+        default = pyoxigraph.DefaultGraph()
+        for quad in staging:
+            self._store.add(pyoxigraph.Quad(quad.subject, quad.predicate, quad.object, default))
+
+    def select(self, sparql: str) -> list[dict[str, str]]:
+        import pyoxigraph
+
+        result = self._store.query(sparql)
+        if not isinstance(result, pyoxigraph.QuerySolutions):
+            return []
+        # Capture variable list before iteration; the iterator is single-pass.
+        variables = result.variables
+        rows = []
+        for solution in result:
+            d = {}
+            for var in variables:
+                val = solution[var]
+                if val is not None:
+                    d[var.value] = val.value
+            rows.append(d)
+        return rows
+
+
 class StardogStore(Store):
     """HTTP store: POST SPARQL to Stardog. Stateless -> reconnect-tolerant."""
 
@@ -70,8 +105,16 @@ class StardogStore(Store):
         return out
 
 
+def _trig_path_from_env() -> Path | str:
+    trig = os.environ.get("KG_TRIG")
+    if trig is None:
+        data_dir = os.environ.get("KG_DATA_DIR")
+        trig = Path(data_dir) / "graph.trig" if data_dir else DEFAULT_TRIG
+    return trig
+
+
 def get_store() -> Store:
-    """Build the store from env. KG_BACKEND=rdflib (default) | stardog."""
+    """Build the store from env. KG_BACKEND=rdflib (default) | stardog | oxigraph."""
     backend = os.environ.get("KG_BACKEND", "rdflib").lower()
     if backend == "stardog":
         return StardogStore(
@@ -80,8 +123,6 @@ def get_store() -> Store:
             user=os.environ.get("KG_STARDOG_USER", "admin"),
             password=os.environ.get("KG_STARDOG_PASSWORD", "admin"),
         )
-    trig = os.environ.get("KG_TRIG")
-    if trig is None:
-        data_dir = os.environ.get("KG_DATA_DIR")
-        trig = Path(data_dir) / "graph.trig" if data_dir else DEFAULT_TRIG
-    return RdflibStore(trig)
+    if backend == "oxigraph":
+        return OxigraphStore(_trig_path_from_env())
+    return RdflibStore(_trig_path_from_env())
