@@ -120,6 +120,23 @@ def doc_section(url: str, anchor: str) -> "URIRef | None":
     return URIRef(f"{KGR}docpage/{_seg(url)}#{anchor}")
 
 
+def mcp_source(server_key: str) -> URIRef:
+    return URIRef(f"{KGR}mcpsource/{_seg(server_key)}")
+
+
+def mcp_page(server_key: str, uri: str) -> URIRef:
+    # Scoped to server_key to avoid IRI collision with web-crawled DocPage nodes
+    # that might share the same resource URI (planning risk #3).
+    return URIRef(f"{KGR}mcppage/{_seg(server_key)}/{_seg(uri)}")
+
+
+def mcp_section(server_key: str, uri: str, anchor: str) -> "URIRef | None":
+    """Return the DocSection IRI for an MCP resource section, or None for empty anchor."""
+    if not anchor:
+        return None
+    return URIRef(f"{KGR}mcppage/{_seg(server_key)}/{_seg(uri)}#{anchor}")
+
+
 def content_hash(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 

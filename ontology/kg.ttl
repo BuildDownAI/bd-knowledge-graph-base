@@ -37,6 +37,9 @@ kg:DocSite      a owl:Class ; rdfs:label "Documentation site" .
 kg:DocPage      a owl:Class ; rdfs:label "Documentation page" .
 kg:DocSection   a owl:Class ; rdfs:label "Documentation section" .
 
+# MCP-source spine (KGB-12): resources ingested from MCP servers.
+kg:McpSource    a owl:Class ; rdfs:label "MCP source server" .
+
 ######################  SEMANTIC CLASSES  ######################
 
 kg:Learning     a owl:Class ; rdfs:label "Learning" .
@@ -96,6 +99,7 @@ kg:anchor           a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSecti
 kg:heading          a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSection heading text
 kg:level            a owl:DatatypeProperty ; rdfs:range xsd:integer . # DocSection heading level (1–4)
 kg:documentsBranch  a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSite: code branch this docs version documents (KGB-5)
+kg:mcpServer        a owl:DatatypeProperty ; rdfs:range xsd:string .  # McpSource server name/endpoint (KGB-12)
 
 # --- tracker (Linear/Jira) spine ---
 kg:trackerKey   a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII-256"

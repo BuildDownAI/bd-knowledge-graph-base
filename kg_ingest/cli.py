@@ -130,6 +130,89 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
     return {"docsite_pages": total_pages, "docsite_sections": total_sections}
 
 
+def _ingest_mcp_sources(spine_g: Graph, mcp_sources_cfg: list) -> dict:
+    """Ingest mcp_sources entries and emit McpSource/DocPage/DocSection triples."""
+    from .mcp_source import McpSourceConfig, fetch_resources
+
+    KG = iris.KG
+    total_pages = 0
+    total_sections = 0
+
+    for entry in mcp_sources_cfg:
+        name = (entry.get("name") or "").strip()
+        command = list(entry.get("command") or [])
+        max_resources = int(entry.get("max_resources", 200))
+
+        if not name:
+            continue
+
+        config = McpSourceConfig(
+            name=name,
+            command=command or None,
+            max_resources=max_resources,
+        )
+
+        print(f"== mcp_source ingest: {name} ==")
+        pages = fetch_resources(config)
+
+        source_iri = iris.mcp_source(name)
+        spine_g.add((source_iri, RDF.type, KG.McpSource))
+        spine_g.add((source_iri, KG.mcpServer, Literal(name)))
+        spine_g.add((source_iri, DCTERMS.title, Literal(name)))
+
+        fetched_ats: list[str] = []
+        for page in pages:
+            _seen_anchors: dict[str, int] = {}
+            page_iri = iris.mcp_page(name, page.uri)
+            spine_g.add((page_iri, RDF.type, KG.DocPage))
+            spine_g.add((page_iri, KG.url, Literal(page.uri)))
+            spine_g.add((page_iri, DCTERMS.title, Literal(page.title)))
+            spine_g.add((page_iri, KG.contentHash, Literal(page.content_hash)))
+            spine_g.add((page_iri, DCTERMS.modified,
+                         Literal(page.fetched_at, datatype=XSD.dateTime)))
+            spine_g.add((page_iri, KG.partOf, source_iri))
+            fetched_ats.append(page.fetched_at)
+
+            preamble_parts: list[str] = []
+            for section in page.sections:
+                if section.level == 0:
+                    if section.text:
+                        preamble_parts.append(section.text)
+                    continue
+
+                anchor = _heading_anchor(section.heading)
+                if anchor:
+                    n = _seen_anchors.get(anchor, 0) + 1
+                    _seen_anchors[anchor] = n
+                    if n > 1:
+                        anchor = f"{anchor}-{n}"
+                sec_iri = iris.mcp_section(name, page.uri, anchor)
+                if sec_iri is None:
+                    continue
+
+                spine_g.add((sec_iri, RDF.type, KG.DocSection))
+                spine_g.add((sec_iri, KG.heading, Literal(section.heading)))
+                spine_g.add((sec_iri, KG.level,
+                             Literal(section.level, datatype=XSD.integer)))
+                spine_g.add((sec_iri, KG.anchor, Literal(anchor)))
+                spine_g.add((sec_iri, KG.text, Literal(section.text)))
+                spine_g.add((sec_iri, KG.partOf, page_iri))
+                total_sections += 1
+
+            if preamble_parts:
+                spine_g.add((page_iri, KG.detail, Literal(" ".join(preamble_parts))))
+
+            total_pages += 1
+
+        source_fetched = (max(fetched_ats) if fetched_ats
+                          else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+        spine_g.add((source_iri, DCTERMS.modified,
+                     Literal(source_fetched, datatype=XSD.dateTime)))
+        print(f"   pages: {total_pages}, sections: {total_sections}")
+
+    return {"mcp_pages": total_pages, "mcp_sections": total_sections}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True, help="path to the source repo to ingest")
@@ -182,6 +265,14 @@ def main(argv=None) -> int:
         print("== docs_sites ingest ==")
         ds_stats = _ingest_docs_sites(spine_g, _docs_sites)
         for k, v in ds_stats.items():
+            print(f"   {k}: {v}")
+
+    # ---- mcp_sources: ingest MCP-served resources into the spine graph ----
+    _mcp_sources = _src_cfg.get("mcp_sources") or []
+    if _mcp_sources:
+        print("== mcp_sources ingest ==")
+        mcp_stats = _ingest_mcp_sources(spine_g, _mcp_sources)
+        for k, v in mcp_stats.items():
             print(f"   {k}: {v}")
 
     # deterministic run id from pipeline ver + corpus fingerprint
