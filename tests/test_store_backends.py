@@ -101,7 +101,7 @@ def main() -> None:
     try:
         import pyoxigraph  # noqa: F401
     except ImportError:
-        print("pyoxigraph not installed — install with: pip install pyoxigraph>=0.4")
+        print("pyoxigraph not installed — install with: pip install -r requirements-oxigraph.txt")
         print("Skipping OxigraphStore tests.")
         raise SystemExit(0)
 
