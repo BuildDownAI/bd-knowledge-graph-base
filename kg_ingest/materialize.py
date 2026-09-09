@@ -13,11 +13,13 @@ Usage:
     python -m kg_ingest.materialize            # graph.trig + embeddings
     python -m kg_ingest.materialize --no-embed # graph.trig only (lexical-only,
                                                #   server runs degraded=true)
+    python -m kg_ingest.materialize --direct   # copy parts directly (low RSS)
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import resource
 import shutil
 import sys
@@ -51,6 +53,35 @@ def materialize_graph(parts_dir: Path = SNAP_PARTS, out_dir: Path = OUT_DIR) -> 
     return len(g)
 
 
+def copy_parts(parts_dir: Path = SNAP_PARTS, out_dir: Path = OUT_DIR) -> int:
+    """Copy snapshot/parts/*.nt to out/parts/ with no rdflib parsing.
+
+    Returns the number of files copied. Writes to a temporary sibling directory
+    first, then renames it into place so a concurrent server startup never reads
+    a half-written parts tree.
+    """
+    parts = sorted(parts_dir.glob("*.nt"))
+    if not parts:
+        raise SystemExit(f"[materialize] no snapshot parts found in {parts_dir}")
+
+    out_parts = out_dir / "parts"
+    tmp_parts = out_dir / "parts.tmp"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if tmp_parts.exists():
+        shutil.rmtree(tmp_parts)
+    tmp_parts.mkdir(parents=True)
+
+    for src in parts:
+        shutil.copy2(src, tmp_parts / src.name)
+
+    if out_parts.exists():
+        shutil.rmtree(out_parts)
+    os.rename(str(tmp_parts), str(out_parts))
+
+    return len(parts)
+
+
 def peak_rss_mb() -> int:
     """Peak resident set size of this process in MB (Linux reports KB, macOS bytes)."""
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -58,14 +89,28 @@ def peak_rss_mb() -> int:
 
 
 def _graph_age_stamp(parts_dir: Path) -> str:
-    """Return the dcterms:modified stamp on the spine IRI from the committed parts."""
+    """Return the dcterms:modified stamp on the spine IRI via a line scan (no rdflib parse).
+
+    Scans N-Triples files for the triple whose subject is G_SPINE and whose predicate is
+    dcterms:modified, then extracts the literal value without loading rdflib.Dataset.
+    """
     from . import iris
-    ds = Dataset()
-    g = ds.graph()
-    for part in sorted(parts_dir.glob("*.nt")):
-        g.parse(part, format="nt")
-    val = g.value(iris.G_SPINE, DCTERMS.modified)
-    return str(val) if val is not None else ""
+    spine_subject = f"<{iris.G_SPINE}>"
+    modified_pred = "<http://purl.org/dc/terms/modified>"
+    for nt_file in sorted(parts_dir.glob("*.nt")):
+        for line in nt_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line.startswith(spine_subject):
+                continue
+            rest = line[len(spine_subject):].strip()
+            if not rest.startswith(modified_pred):
+                continue
+            obj = rest[len(modified_pred):].strip()
+            # NT literal form: "value"^^<datatype> .  or  "value" .
+            if obj.startswith('"'):
+                end = obj.index('"', 1)
+                return obj[1:end]
+    return ""
 
 
 def copy_embeddings(
@@ -111,14 +156,32 @@ def copy_embeddings(
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Reconstitute out/graph.trig from committed snapshot parts."
+        description="Reconstitute out/graph.trig (or out/parts/) from committed snapshot parts."
     )
     ap.add_argument(
         "--no-embed",
         action="store_true",
         help="skip rebuilding the semantic embeddings sidecar (server runs lexical-only)",
     )
+    ap.add_argument(
+        "--direct",
+        action="store_true",
+        help=(
+            "copy snapshot/parts/*.nt to out/parts/ without rdflib re-serialization "
+            "(low-RSS path for in-place refresh; use KG_BACKEND=nt_parts to serve)"
+        ),
+    )
     args = ap.parse_args(argv)
+
+    if args.direct:
+        n = copy_parts()
+        print(f"[materialize] out/parts/ from snapshot/parts — {n} files (peak RSS {peak_rss_mb()} MB)")
+        if args.no_embed:
+            print("[materialize] --no-embed: semantic search will run degraded (lexical-only)")
+            return 0
+        copy_embeddings()
+        print("[materialize] embeddings copied from snapshot/")
+        return 0
 
     n = materialize_graph()
     # Peak RSS is printed so an OOM kill on the next run has a number beside it:
