@@ -29,6 +29,18 @@ code_repo:
     - docs/adr/*.md                     #   architecture decisions   -> kg:Decision
     - docs/plans/*.md                   #   implementation plans     -> kg:Decision
 
+# ---- Tracker comment classification (KGB-16) --------------------------------
+# First lines that start with these headings are typed as kg:PlanningNote.
+# "AI Planning:" is always built-in; list additional headings here to extend.
+# comment_headings:
+#   - "## AI Planning:"
+#   - "Planning Output:"
+#
+# Linear user names (exact, case-insensitive) treated as bots — never Decision.
+# Names ending in "bot" are also auto-detected as bots.
+# bot_users:
+#   - "my-orchestrator-bot"
+
 # ---- Trackers to ingest (Linear; Jira planned). tier: primary is bound to ---
 # ---- code_repo; secondary teams ride along. Requires LINEAR_API_KEY. --------
 trackers: []

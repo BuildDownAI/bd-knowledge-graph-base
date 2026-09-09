@@ -44,6 +44,10 @@ _LEARNING_MARKERS = (
     "ai-implement-kg-refresh-learnings",
 )
 _DECISION_MIN_CHARS = 400
+_SMOKE_JUMPER_HEADING = "## \U0001f525 Smoke-Jumper Report"
+# "AI Planning:" is always treated as a planning-note heading on the tracker
+# path (injected by _add_issue). comment_headings: in sources.yml adds extras.
+_BUILTIN_PLANNING_HEADING = "AI Planning:"
 
 # Linear workflow-STATE labels the orchestrator uses to drive the pipeline
 # (the AI-Implement pipeline lifecycle: AI-Implement -> AI-Planning -> Plan-Complete -> AI-Working ->
@@ -128,15 +132,24 @@ def _first_line(body: str) -> str:
     return ""
 
 
-def _classify(body: str) -> str | None:
+def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str | None:
     # A learning marker only counts on the FIRST line — the bd-build-up/down
     # skills lead the comment with `# ai-implement-build-{up,down}-learnings`.
     # Matching the marker anywhere in the body over-catches planning/summary
     # comments that merely mention it (keeps _classify aligned with _comment_title).
-    first = _first_line(body).lower()
-    if any(m in first for m in _LEARNING_MARKERS):
+    first_lower = _first_line(body).lower()
+    if any(m in first_lower for m in _LEARNING_MARKERS):
         return "learning"
-    if len(body.strip()) >= _DECISION_MIN_CHARS:
+    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    if raw_first.startswith(_SMOKE_JUMPER_HEADING):
+        return "verification"
+    # Planning note: first line starts with any heading in the caller-supplied list.
+    # "AI Planning:" is injected by _add_issue; _classify itself has no built-in default
+    # so existing callers without headings retain the old Decision behaviour.
+    if headings and any(raw_first.startswith(h) for h in headings):
+        return "planning_note"
+    # Decision: substantial human comment only — bots never produce Decision nodes.
+    if not is_bot and len(body.strip()) >= _DECISION_MIN_CHARS:
         return "decision"
     return None
 
@@ -150,11 +163,15 @@ def _classify_pr_comment(body: str, author_login: str) -> str | None:
     first = _first_line(body).lower()
     if any(m in first for m in _LEARNING_MARKERS):
         return "learning"
-    # Verification: smoke-jumper report heading or embedded verdict markers
+    # Verification: smoke-jumper report heading or embedded verdict markers.
+    # Exclude status=start progress lines — those are in-progress signals, not reports.
     raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
-    if raw_first.startswith("## \U0001f525 Smoke-Jumper Report"):
+    if raw_first.startswith(_SMOKE_JUMPER_HEADING):
         return "verification"
-    if "<!-- claude-review-verdict" in body or "<!-- ai-implement post-push" in body:
+    if "<!-- claude-review-verdict" in body:
+        return "verification"
+    if ("<!-- ai-implement post-push" in body
+            and "<!-- ai-implement post-push status=start" not in body):
         return "verification"
     # Decision: substantial human comment only
     login_lower = author_login.lower()
@@ -181,8 +198,15 @@ def _comment_title(ident: str, issue_title: str, body: str, kind: str) -> str:
     return f"{ident}: {fl}" if fl else f"{ident} note"
 
 
+def _is_bot_user(name: str, bot_users: set[str]) -> bool:
+    """Return True when a Linear user name looks like a bot."""
+    nl = name.lower()
+    return nl in bot_users or nl.endswith("bot")
+
+
 def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
-               iss: dict, stats: dict) -> None:
+               iss: dict, stats: dict, headings: tuple = (),
+               bot_users: set[str] | None = None) -> None:
     ident = iss["identifier"]
     node = iris.tracker_issue(ident)
     spine_g.add((node, RDF.type, KG.Issue))
@@ -237,26 +261,33 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
             spine_g.add((node, KG.relatedTo, oi))
     stats["issues"] += 1
 
-    # ---- comments -> semantic layer (Learning / Decision) ----
+    # ---- comments -> semantic layer (Learning / Decision / PlanningNote / Verification) ----
     label_tags = [l["name"].lower() for l in (iss.get("labels") or {}).get("nodes", [])
                   if l.get("name") and l["name"].lower() not in _LIFECYCLE_LABELS]
+    _bot_users = bot_users or set()
     for i, cm in enumerate(((iss.get("comments") or {}).get("nodes", []))):
         body = (cm.get("body") or "").strip()
-        kind = _classify(body)
+        author = (cm.get("user") or {}).get("name") or ""
+        is_bot = _is_bot_user(author, _bot_users) if author else False
+        kind = _classify(body, headings=headings, is_bot=is_bot)
         if not kind:
             continue
         cnode = iris.comment(ident, i)
-        cls = KG.Learning if kind == "learning" else KG.Decision
-        run_g.add((cnode, RDF.type, cls))
+        _KIND_CLS = {
+            "learning": KG.Learning,
+            "decision": KG.Decision,
+            "planning_note": KG.PlanningNote,
+            "verification": KG.Verification,
+        }
+        run_g.add((cnode, RDF.type, _KIND_CLS[kind]))
         title = _comment_title(ident, iss.get("title") or "", body, kind)
         run_g.add((cnode, DCTERMS.title, Literal(title[:300], datatype=XSD.string)))
         run_g.add((cnode, KG.detail, Literal(body[:2000])))
-        if kind == "learning":
-            run_g.add((cnode, KG.fix, Literal(body[:400])))  # snippet for kg_search
+        if kind in ("learning", "planning_note", "verification"):
+            run_g.add((cnode, KG.fix, Literal(body[:400])))
         # mandatory provenance: derived from the Issue (spine), generated by run
         run_g.add((cnode, PROV.wasDerivedFrom, node))
         run_g.add((cnode, PROV.wasGeneratedBy, run))
-        author = (cm.get("user") or {}).get("name")
         if author:
             person = iris.person(author)
             run_g.add((person, RDF.type, KG.Person))
@@ -264,7 +295,13 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
             run_g.add((cnode, PROV.wasAttributedTo, person))
         for tag in label_tags:
             run_g.add((cnode, KG.tagged, _topic(run_g, tag)))
-        stats["comment_learnings" if kind == "learning" else "comment_decisions"] += 1
+        stat_key = {
+            "learning": "comment_learnings",
+            "decision": "comment_decisions",
+            "planning_note": "comment_planning_notes",
+            "verification": "comment_verifications",
+        }[kind]
+        stats[stat_key] += 1
 
 
 def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
@@ -283,8 +320,14 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
     _bind(spine_g); _bind(run_g)
     run = _run_node(run_g, run_id, pipeline_ver)
     stats = {"teams": [], "issues": 0, "comment_learnings": 0,
-             "comment_decisions": 0}
-    for entry in sources.trackers(cfg):
+             "comment_decisions": 0, "comment_planning_notes": 0,
+             "comment_verifications": 0}
+    cfg_data = cfg or sources.load()
+    # "AI Planning:" is always injected; comment_headings: in sources.yml adds extras.
+    extra_headings = tuple(cfg_data.get("comment_headings") or [])
+    headings = (_BUILTIN_PLANNING_HEADING,) + extra_headings
+    bot_users = set(cfg_data.get("bot_users") or [])
+    for entry in sources.trackers(cfg_data):
         if entry.get("kind") != "linear":
             continue
         tier = entry.get("tier") or "primary"
@@ -293,6 +336,7 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
         team = entry["team"]
         issues = _fetch_team_issues(team, api_key)
         for iss in issues:
-            _add_issue(spine_g, run_g, run, team, iss, stats)
+            _add_issue(spine_g, run_g, run, team, iss, stats,
+                       headings=headings, bot_users=bot_users)
         stats["teams"].append(f"{team}({tier}):{len(issues)}")
     return stats
