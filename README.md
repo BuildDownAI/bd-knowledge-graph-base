@@ -90,6 +90,21 @@ git fetch upstream && git merge upstream/main
 Your business config (`sources.yml`, `snapshot/`, `out/`) never conflicts — the
 base never ships real bindings or data.
 
+## Host sizing
+
+`kg_ingest.materialize` loads every `snapshot/parts/*.nt` into one in-memory rdflib
+graph before it writes `out/graph.trig` (about 270 MB resident at ~31k quads). The
+serving sidecar holds the fastembed model (300–400 MB) at the same time. Size hosts by
+the path that runs on them:
+
+| Path | Minimum host memory |
+|---|---|
+| Serve only (materialize at image build) | 512 MB |
+| In-place refresh beside the serving sidecar, ≤ ~40k quads | 1 GB |
+
+Materialize prints its peak RSS on every run; when a refresh dies with a bare
+"Command failed" and the host log shows an OOM kill, that line is the number to size against.
+
 ## Improving the base — the learnings loop
 
 Operating a KG teaches you things the base should absorb (ingest failure
