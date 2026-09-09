@@ -3,7 +3,11 @@ on its FIRST line (not merely present somewhere in the body).
 
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_classify.py
 """
-from kg_ingest.tracker import _classify, _classify_pr_comment, _comment_title
+from kg_ingest.tracker import _classify, _classify_pr_comment, _comment_title, _add_issue, _run_node
+from rdflib import Graph, Literal, URIRef
+from rdflib.namespace import RDF
+from kg_ingest import iris
+from kg_ingest.tracker import KG, PROV, DCTERMS, _bind
 
 BODY_LONG = "x " * 250  # ~500 chars, comfortably over _DECISION_MIN_CHARS (400)
 
@@ -88,3 +92,77 @@ check("pr: short -> None",
       None)
 
 print("\nall _classify_pr_comment tests passed")
+
+# ---- _classify: new KGB-16 cases ----
+
+# Smoke-jumper heading on an issue comment -> verification
+check("issue: smoke-jumper heading -> verification",
+      _classify("## \U0001f525 Smoke-Jumper Report\n\nAll clear."),
+      "verification")
+
+# AI Planning: first line with headings kwarg -> planning_note
+check("issue: AI Planning: first line -> planning_note",
+      _classify("AI Planning: Sprint scope\n" + "x " * 250,
+                headings=("AI Planning:",)),
+      "planning_note")
+
+# AI Planning: first line WITHOUT headings kwarg -> decision (old callers unchanged)
+check("issue: AI Planning: first line, no headings -> decision",
+      _classify("AI Planning: Sprint scope\n" + "x " * 250),
+      "decision")
+
+# is_bot=True suppresses Decision
+check("issue: bot author >=400 -> None",
+      _classify(BODY_LONG, is_bot=True),
+      None)
+
+# Verification heading takes precedence over bot=True
+check("issue: smoke-jumper + bot=True -> verification",
+      _classify("## \U0001f525 Smoke-Jumper Report\nAll clear.", is_bot=True),
+      "verification")
+
+# ---- _classify_pr_comment: status=start exclusion (KGB-7 residual) ----
+
+check("pr: status=start -> None (not verification)",
+      _classify_pr_comment(
+          "<!-- ai-implement post-push status=start -->\nRunning post-implementation review…",
+          "ai-implement[bot]"),
+      None)
+
+# A valid post-push marker (no status=start) still classifies as verification
+check("pr: post-push no status=start -> verification",
+      _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "ai-implement[bot]"),
+      "verification")
+
+# ---- _add_issue round-trip: AI Planning: comment -> kg:PlanningNote ----
+
+def _make_graphs():
+    spine_g, run_g = Graph(), Graph()
+    _bind(spine_g); _bind(run_g)
+    return spine_g, run_g
+
+_planning_body = "AI Planning: Sprint scope\n" + "x " * 250  # 500+ chars
+
+spine_g, run_g = _make_graphs()
+run = _run_node(run_g, "test-run-1", "0.0.0-test")
+_add_issue(spine_g, run_g, run, "TEST",
+           {"identifier": "TEST-1", "title": "Test issue",
+            "comments": {"nodes": [{"body": _planning_body, "user": {"name": "orchestrator"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=("AI Planning:",))
+
+cnode = iris.comment("TEST-1", 0)
+types_in_run_g = set(run_g.objects(cnode, RDF.type))
+check("add_issue: AI Planning: -> kg:PlanningNote in run_g",
+      KG.PlanningNote in types_in_run_g,
+      True)
+check("add_issue: AI Planning: -> provenance wasDerivedFrom",
+      (cnode, PROV.wasDerivedFrom, iris.tracker_issue("TEST-1")) in run_g,
+      True)
+check("add_issue: AI Planning: -> provenance wasGeneratedBy",
+      len(list(run_g.objects(cnode, PROV.wasGeneratedBy))) >= 1,
+      True)
+
+print("\nall KGB-16 tests passed")
