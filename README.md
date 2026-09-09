@@ -101,6 +101,7 @@ the path that runs on them:
 |---|---|
 | Serve only (materialize at image build) | 512 MB |
 | In-place refresh beside the serving sidecar, ≤ ~40k quads | 1 GB |
+| In-place refresh via `--direct` + `KG_BACKEND=nt_parts` (no rdflib re-serialization) | 512 MB (`copy_parts` peak RSS ≈ 28 MB at ~30k triples — no rdflib parse) |
 
 Materialize prints its peak RSS on every run; when a refresh dies with a bare
 "Command failed" and the host log shows an OOM kill, that line is the number to size against.

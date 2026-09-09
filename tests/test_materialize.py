@@ -150,9 +150,58 @@ def test_missing_npz_exits_nonzero():
     print("test_missing_npz_exits_nonzero: OK")
 
 
+def test_copy_parts_roundtrip():
+    """copy_parts copies all nt files to out/parts/; NtPartsStore loads the same triple count."""
+    from kg_query.store import NtPartsStore
+
+    src = _fixture_union()
+    with tempfile.TemporaryDirectory() as d:
+        parts = Path(d) / "parts"
+        out = Path(d) / "out"
+        snapshot.write_parts(src, parts)
+        materialize.copy_parts(parts_dir=parts, out_dir=out)
+
+        store = NtPartsStore(parts_dir=out / "parts")
+        assert len(store._g) == len(src), (
+            f"NtPartsStore triple count {len(store._g)} != source {len(src)}"
+        )
+    print("test_copy_parts_roundtrip: OK")
+
+
+def test_nt_parts_store_parity():
+    """NtPartsStore returns the same SPARQL SELECT results as RdflibStore on the same data."""
+    from kg_query.store import RdflibStore, NtPartsStore
+
+    src = _fixture_union()
+    with tempfile.TemporaryDirectory() as d:
+        parts = Path(d) / "parts"
+        out_trig = Path(d) / "out_trig"
+        out_nt = Path(d) / "out_nt"
+        snapshot.write_parts(src, parts)
+        materialize.materialize_graph(parts_dir=parts, out_dir=out_trig)
+        materialize.copy_parts(parts_dir=parts, out_dir=out_nt)
+
+        rdflib_store = RdflibStore(trig_path=out_trig / "graph.trig")
+        nt_store = NtPartsStore(parts_dir=out_nt / "parts")
+
+        sparql = "SELECT ?s ?p ?o WHERE { ?s ?p ?o } ORDER BY ?s ?p ?o"
+        rdflib_rows = rdflib_store.select(sparql)
+        nt_rows = nt_store.select(sparql)
+
+        rdflib_set = {frozenset(r.items()) for r in rdflib_rows}
+        nt_set = {frozenset(r.items()) for r in nt_rows}
+        assert rdflib_set == nt_set, (
+            f"NtPartsStore SPARQL results differ from RdflibStore: "
+            f"{len(rdflib_rows)} vs {len(nt_rows)} rows"
+        )
+    print("test_nt_parts_store_parity: OK")
+
+
 if __name__ == "__main__":
     test_fastembed_not_imported()
     test_materialize_roundtrip()
     test_copy_embeddings_byte_identical()
     test_stamp_mismatch_exits_nonzero()
     test_missing_npz_exits_nonzero()
+    test_copy_parts_roundtrip()
+    test_nt_parts_store_parity()
