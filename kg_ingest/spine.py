@@ -13,6 +13,7 @@ from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, XSD, Namespace
 
 from . import iris, normalize
+from .tracker import _classify_pr_comment, _first_line
 
 KG = iris.KG
 PROV = Namespace("http://www.w3.org/ns/prov#")
@@ -20,6 +21,8 @@ DCTERMS = Namespace("http://purl.org/dc/terms/")
 FOAF = Namespace("http://xmlns.com/foaf/0.1/")
 
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt"}
+
+_MAX_PR_COMMENTS = 50
 
 # Doc pages get a real title + snippet at spine time (AII-345) so they can be
 # embedded as search cards — a Doc node that is only a path is invisible to
@@ -71,6 +74,50 @@ def _is_bot(login: str) -> bool:
     return l.endswith("[bot]") or l.endswith("-bot") or "bot]" in l
 
 
+def _pr_comment_run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
+    r = URIRef(f"{iris.KGR}run/{run_id}")
+    g.add((r, RDF.type, KG.ExtractionRun))
+    g.add((r, KG.pipelineVer, Literal(pipeline_ver)))
+    g.add((r, KG.model, Literal("deterministic-spine")))
+    g.add((r, KG.promptHash, Literal("n/a-deterministic")))
+    g.add((r, KG.notes, Literal("Phase-1 deterministic PR-comment ingest")))
+    return r
+
+
+def _add_pr_comments(g: Graph, run: URIRef, repo_slug: str, pr_number: int,
+                     pnode: URIRef, comments: list[dict], stats: dict) -> int:
+    """Classify and emit nodes for PR comments. Returns count of nodes added."""
+    count = 0
+    for cm in comments:
+        body = (cm.get("body") or "").strip()
+        login = (cm.get("user") or {}).get("login") or "unknown"
+        kind = _classify_pr_comment(body, login)
+        if not kind:
+            continue
+        cid = cm["id"]
+        cnode = iris.pr_comment(repo_slug, pr_number, cid)
+        cls = (KG.Learning if kind == "learning"
+               else KG.Verification if kind == "verification"
+               else KG.Decision)
+        g.add((cnode, RDF.type, cls))
+        title = _first_line(body)[:400] or str(cid)
+        g.add((cnode, DCTERMS.title, Literal(title, datatype=XSD.string)))
+        g.add((cnode, KG.fix, Literal(body[:400])))
+        created_at = cm.get("created_at") or ""
+        if created_at:
+            g.add((cnode, DCTERMS.created, Literal(created_at, datatype=XSD.dateTime)))
+        p = iris.person(login)
+        g.add((p, RDF.type, KG.BotAgent if _is_bot(login) else KG.Person))
+        g.add((p, KG.login, Literal(login)))
+        g.add((cnode, PROV.wasAttributedTo, p))
+        g.add((cnode, KG.about, pnode))
+        g.add((cnode, PROV.wasDerivedFrom, pnode))
+        g.add((cnode, PROV.wasGeneratedBy, run))
+        count += 1
+    stats["pr_comments"] = stats.get("pr_comments", 0) + count
+    return count
+
+
 def _bind(g: Graph) -> None:
     g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
     g.bind("dcterms", DCTERMS); g.bind("foaf", FOAF)
@@ -93,11 +140,12 @@ def _link_tracker(g: Graph, node: URIRef, text: str, stats: dict) -> None:
 
 def add_spine(g: Graph, repo_path: Path, repo_slug: str,
               max_commits: int | None = 500, max_prs: int = 60,
-              docs_url: str | None = None) -> dict:
+              docs_url: str | None = None,
+              pipeline_ver: str = "0.1.0") -> dict:
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
     repo_path = Path(repo_path)
-    stats = {"files": 0, "commits": 0, "people": 0, "prs": 0,
+    stats = {"files": 0, "commits": 0, "people": 0, "prs": 0, "pr_comments": 0,
              "commit_cap": max_commits, "pr_cap": max_prs}
     people: set[str] = set()
 
@@ -160,6 +208,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
 
     # --- pull requests (via gh, capped) ---
     if max_prs:
+        _pr_run_id = iris.stable_run_id(pipeline_ver, repo_slug + ":pr-comments")
+        _pr_run = _pr_comment_run_node(g, _pr_run_id, pipeline_ver)
         try:
             raw = subprocess.run(
                 ["gh", "pr", "list", "--repo", repo_slug, "--state", "all",
@@ -182,6 +232,18 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                 _link_tracker(g, pnode, f"{pr.get('title') or ''} {pr.get('body') or ''}", stats)
                 people.add(login)
                 stats["prs"] += 1
+                try:
+                    raw_c = subprocess.run(
+                        ["gh", "api", "--paginate",
+                         f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
+                        capture_output=True, text=True, check=True, cwd=str(repo_path),
+                    ).stdout
+                    comments = json.loads(raw_c)[:_MAX_PR_COMMENTS]
+                except (subprocess.CalledProcessError, json.JSONDecodeError,
+                        FileNotFoundError) as ce:
+                    comments = []
+                    stats.setdefault("pr_comment_errors", []).append(str(ce)[:200])
+                _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
         except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
             stats["pr_error"] = str(e)[:200]
 

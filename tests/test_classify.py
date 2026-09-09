@@ -3,7 +3,7 @@ on its FIRST line (not merely present somewhere in the body).
 
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_classify.py
 """
-from kg_ingest.tracker import _classify, _comment_title
+from kg_ingest.tracker import _classify, _classify_pr_comment, _comment_title
 
 BODY_LONG = "x " * 250  # ~500 chars, comfortably over _DECISION_MIN_CHARS (400)
 
@@ -44,3 +44,47 @@ check("title uses phase form",
       title, "PROJ-259 build-up learnings — Dispatch dedup has no TTL")
 
 print("\nall classify tests passed")
+
+# ---- _classify_pr_comment tests ----
+
+# kg-refresh learnings marker -> learning
+check("pr: kg-refresh marker -> learning",
+      _classify_pr_comment(
+          "# ai-implement-kg-refresh-learnings\n**Refresh:** 2026-09-01\n## What happened\nX",
+          "ai-implement[bot]"),
+      "learning")
+
+# Smoke-jumper report heading -> verification
+check("pr: smoke-jumper heading -> verification",
+      _classify_pr_comment("## \U0001f525 Smoke-Jumper Report\n\nAll clear.", "smoke-jumper[bot]"),
+      "verification")
+
+# claude-review-verdict marker -> verification
+check("pr: claude-review-verdict marker -> verification",
+      _classify_pr_comment("<!-- claude-review-verdict pass -->\nLGTM.", "reviewer"),
+      "verification")
+
+# ai-implement post-push marker -> verification
+check("pr: ai-implement post-push marker -> verification",
+      _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "reviewer"),
+      "verification")
+
+# Bot author >=400 chars -> None (bots can't be decision)
+check("pr: bot [bot] >=400 -> None",
+      _classify_pr_comment(BODY_LONG, "gh-actions[bot]"),
+      None)
+check("pr: orchestrator-bot >=400 -> None",
+      _classify_pr_comment(BODY_LONG, "ai-implement-orchestrator-bot"),
+      None)
+
+# Human >=400 chars -> decision
+check("pr: human >=400 -> decision",
+      _classify_pr_comment(BODY_LONG, "alice"),
+      "decision")
+
+# Short comment, no marker -> None
+check("pr: short -> None",
+      _classify_pr_comment("lgtm", "alice"),
+      None)
+
+print("\nall _classify_pr_comment tests passed")

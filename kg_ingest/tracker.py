@@ -41,6 +41,7 @@ _LEARNING_MARKERS = (
     "ai-implement-build-down-learnings",
     "build-down-learnings",
     "build-up-learnings",
+    "ai-implement-kg-refresh-learnings",
 )
 _DECISION_MIN_CHARS = 400
 
@@ -136,6 +137,29 @@ def _classify(body: str) -> str | None:
     if any(m in first for m in _LEARNING_MARKERS):
         return "learning"
     if len(body.strip()) >= _DECISION_MIN_CHARS:
+        return "decision"
+    return None
+
+
+def _classify_pr_comment(body: str, author_login: str) -> str | None:
+    """Classify a GitHub PR comment for ingest.
+
+    Bot authors (login ends with '[bot]' or is 'ai-implement-orchestrator-bot')
+    can be learning or verification but never decision.
+    """
+    first = _first_line(body).lower()
+    if any(m in first for m in _LEARNING_MARKERS):
+        return "learning"
+    # Verification: smoke-jumper report heading or embedded verdict markers
+    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    if raw_first.startswith("## \U0001f525 Smoke-Jumper Report"):
+        return "verification"
+    if "<!-- claude-review-verdict" in body or "<!-- ai-implement post-push" in body:
+        return "verification"
+    # Decision: substantial human comment only
+    login_lower = author_login.lower()
+    is_bot = login_lower.endswith("[bot]") or login_lower == "ai-implement-orchestrator-bot"
+    if not is_bot and len(body.strip()) >= _DECISION_MIN_CHARS:
         return "decision"
     return None
 
