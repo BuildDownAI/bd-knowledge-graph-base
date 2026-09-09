@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import resource
 import shutil
+import sys
 from pathlib import Path
 
 from rdflib import Dataset
@@ -47,6 +49,12 @@ def materialize_graph(parts_dir: Path = SNAP_PARTS, out_dir: Path = OUT_DIR) -> 
     out_dir.mkdir(parents=True, exist_ok=True)
     ds.serialize(out_dir / "graph.trig", format="trig")
     return len(g)
+
+
+def peak_rss_mb() -> int:
+    """Peak resident set size of this process in MB (Linux reports KB, macOS bytes)."""
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(rss / (1024 * 1024) if sys.platform == "darwin" else rss / 1024)
 
 
 def _graph_age_stamp(parts_dir: Path) -> str:
@@ -113,7 +121,10 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     n = materialize_graph()
-    print(f"[materialize] out/graph.trig from snapshot/parts — {n} triples")
+    # Peak RSS is printed so an OOM kill on the next run has a number beside it:
+    # materialize holds the whole graph in rdflib (~270 MB at ~31k quads) and, beside a
+    # serving sidecar, exceeds a 512 MB host. See README "Host sizing".
+    print(f"[materialize] out/graph.trig from snapshot/parts — {n} triples (peak RSS {peak_rss_mb()} MB)")
 
     if args.no_embed:
         print("[materialize] --no-embed: semantic search will run degraded (lexical-only)")
