@@ -82,6 +82,26 @@ kg:DocSectionShape a sh:NodeShape ;
     sh:property [ sh:path kg:text ;    sh:minCount 1 ; sh:datatype xsd:string ] ;
     sh:property [ sh:path kg:partOf ;  sh:minCount 1 ; sh:nodeKind sh:IRI ] .
 
+# PR comment nodes (KGB-7): typed kg:Learning/Verification/Decision with kg:about -> PR.
+kg:PRCommentShape a sh:NodeShape ;
+    sh:targetSubjectsOf kg:about ;
+    sh:property [
+        sh:path dcterms:title ;
+        sh:minCount 1 ;
+        sh:message "PR comment node must have dcterms:title" ;
+    ] ;
+    sh:property [
+        sh:path kg:about ;
+        sh:minCount 1 ;
+        sh:nodeKind sh:IRI ;
+        sh:message "PR comment node must link to its PullRequest via kg:about" ;
+    ] ;
+    sh:property [
+        sh:path dcterms:created ;
+        sh:minCount 1 ;
+        sh:message "PR comment node must have dcterms:created" ;
+    ] .
+
 # MCP-source spine shape (KGB-12). Distinct class from DocSite — not retrofitted.
 kg:McpSourceShape a sh:NodeShape ;
     sh:targetClass kg:McpSource ;
