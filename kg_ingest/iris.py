@@ -79,6 +79,10 @@ def comment(issue_identifier: str, ordinal: int) -> URIRef:
     return URIRef(f"{KGR}comment/{_seg(issue_identifier)}/{ordinal}")
 
 
+def pr_comment(repo_slug: str, pr_number: int | str, comment_id: int | str) -> URIRef:
+    return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/comment/{comment_id}")
+
+
 def project(name: str) -> URIRef:
     return URIRef(f"{KGR}project/{_seg(name)}")
 

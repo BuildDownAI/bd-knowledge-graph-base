@@ -39,6 +39,13 @@ SELECT ?iri ?title ?detail WHERE {
 } ORDER BY ?iri
 """
 
+_VERIFICATION_Q = PREFIXES + """
+SELECT ?iri ?title ?fix WHERE {
+  ?iri a kg:Verification ; dcterms:title ?title .
+  OPTIONAL { ?iri kg:fix ?fix }
+} ORDER BY ?iri
+"""
+
 # Issues use their non-lifecycle kg:label values directly (per the spec), not
 # kg:tagged topics — so a label that never became a topic still reaches the card.
 # Lifecycle labels are filtered out in Python (_group_by_iri drop_lc).
@@ -123,6 +130,8 @@ def build_cards(store) -> list[dict]:
                            [", ".join(rec["tags"])], rec["extra"]))
     for iri, rec in _group_by_iri(store.select(_DECISION_Q), "detail").items():
         cards.append(_card(iri, "Decision", rec["title"], [], rec["extra"]))
+    for iri, rec in _group_by_iri(store.select(_VERIFICATION_Q), "fix").items():
+        cards.append(_card(iri, "Verification", rec["title"], [], rec["extra"]))
     for iri, rec in _group_by_iri(store.select(_ISSUE_Q), "description",
                                   drop_lc=_LIFECYCLE_LABELS).items():
         # Issue key in the card title (AII-340 finding): the exact-ID boost

@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 DEFAULT_TRIG = Path(__file__).resolve().parent.parent / "out" / "graph.trig"
+DEFAULT_PARTS_DIR = Path(__file__).resolve().parent.parent / "out" / "parts"
 
 
 class Store(ABC):
@@ -81,6 +82,33 @@ class OxigraphStore(Store):
         return rows
 
 
+class NtPartsStore(Store):
+    """In-process store that loads N-Triples parts directly, skipping TriG serialization.
+
+    Accepts a directory of *.nt files (e.g. out/parts/) and flattens them into a
+    union Graph for SPARQL. Produces the same select() results as RdflibStore on
+    the same triples, with no Dataset.serialize call.
+    """
+
+    def __init__(self, parts_dir: Path = DEFAULT_PARTS_DIR):
+        from rdflib import Graph
+        union = Graph()
+        for nt_file in sorted(parts_dir.glob("*.nt")):
+            union.parse(str(nt_file), format="nt")
+        self._g = union
+
+    def select(self, sparql: str) -> list[dict[str, str]]:
+        rows = []
+        for row in self._g.query(sparql):
+            d = {}
+            for var in row.labels:
+                val = row[var]
+                if val is not None:
+                    d[str(var)] = str(val)
+            rows.append(d)
+        return rows
+
+
 class StardogStore(Store):
     """HTTP store: POST SPARQL to Stardog. Stateless -> reconnect-tolerant."""
 
@@ -114,7 +142,7 @@ def _trig_path_from_env() -> Path | str:
 
 
 def get_store() -> Store:
-    """Build the store from env. KG_BACKEND=rdflib (default) | stardog | oxigraph."""
+    """Build the store from env. KG_BACKEND=rdflib (default) | stardog | oxigraph | nt_parts."""
     backend = os.environ.get("KG_BACKEND", "rdflib").lower()
     if backend == "stardog":
         return StardogStore(
@@ -125,4 +153,8 @@ def get_store() -> Store:
         )
     if backend == "oxigraph":
         return OxigraphStore(_trig_path_from_env())
+    if backend == "nt_parts":
+        parts_env = os.environ.get("KG_PARTS_DIR")
+        parts_dir = Path(parts_env) if parts_env else DEFAULT_PARTS_DIR
+        return NtPartsStore(parts_dir)
     return RdflibStore(_trig_path_from_env())
