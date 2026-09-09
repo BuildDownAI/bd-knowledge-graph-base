@@ -14,6 +14,11 @@ from kg_ingest import iris
 from kg_ingest.iris import KG, KGR
 from kg_ingest.spine import _add_pr_comments, _pr_comment_run_node
 
+# Captured before any test body runs (see the final check).
+_SNAPSHOT_STATUS_BEFORE = subprocess.run(
+    ["git", "status", "--porcelain", "snapshot/"], capture_output=True, text=True,
+).stdout.strip()
+
 PROV = Namespace("http://www.w3.org/ns/prov#")
 DCTERMS = Namespace("http://purl.org/dc/terms/")
 
@@ -108,12 +113,14 @@ def main():
     check("short comment 1004 has no node",
           len(list(g.triples((c4, None, None)))), 0)
 
-    # snapshot/ is clean (no new or modified files)
+    # snapshot/ is untouched by this test. Compare against the state captured
+    # before the test body ran: in CI every tests/test_*.py runs in one checkout
+    # and earlier files (embed, semantic) leave snapshot/embeddings.* behind.
     result = subprocess.run(
         ["git", "status", "--porcelain", "snapshot/"],
         capture_output=True, text=True,
     )
-    check("snapshot/ is clean", result.stdout.strip(), "")
+    check("snapshot/ is untouched by this test", result.stdout.strip(), _SNAPSHOT_STATUS_BEFORE)
 
     print("\nall pr_comments tests passed")
 
