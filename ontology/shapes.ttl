@@ -13,7 +13,8 @@
 
 kg:SemanticNodeShape a sh:NodeShape ;
     sh:targetClass kg:Learning, kg:Decision, kg:Constraint,
-                   kg:FailureMode, kg:Observation, kg:Verification ;
+                   kg:FailureMode, kg:Observation, kg:Verification,
+                   kg:PlanningNote ;
     sh:property [
         sh:path prov:wasDerivedFrom ;
         sh:minCount 1 ;
@@ -100,6 +101,16 @@ kg:PRCommentShape a sh:NodeShape ;
         sh:path dcterms:created ;
         sh:minCount 1 ;
         sh:message "PR comment node must have dcterms:created" ;
+    ] .
+
+# PlanningNote shape (KGB-16): orchestrator planning output — requires a title.
+kg:PlanningNoteShape a sh:NodeShape ;
+    sh:targetClass kg:PlanningNote ;
+    sh:property [
+        sh:path dcterms:title ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "planning note must have a dcterms:title" ;
     ] .
 
 # MCP-source spine shape (KGB-12). Distinct class from DocSite — not retrofitted.

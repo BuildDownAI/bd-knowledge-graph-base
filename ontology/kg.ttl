@@ -64,7 +64,9 @@ kg:Decision     rdfs:subClassOf kg:SemanticNode .
 kg:Constraint   rdfs:subClassOf kg:SemanticNode .
 kg:FailureMode  rdfs:subClassOf kg:SemanticNode .
 kg:Observation  rdfs:subClassOf kg:SemanticNode .
-kg:Verification rdfs:subClassOf kg:SemanticNode .
+kg:Verification  rdfs:subClassOf kg:SemanticNode .
+kg:PlanningNote  a owl:Class ; rdfs:label "Planning note (orchestrator planning output)" .
+kg:PlanningNote  rdfs:subClassOf kg:SemanticNode .
 
 ####################  PROVENANCE / VERSIONING  ####################
 

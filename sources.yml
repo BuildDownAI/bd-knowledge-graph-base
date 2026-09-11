@@ -29,6 +29,18 @@ code_repo:
     - docs/adr/*.md                     #   architecture decisions   -> kg:Decision
     - docs/plans/*.md                   #   implementation plans     -> kg:Decision
 
+# ---- Tracker comment classification (KGB-16) --------------------------------
+# First lines that start with these headings are typed as kg:PlanningNote.
+# "AI Planning:" is always built-in; list additional headings here to extend.
+# comment_headings:
+#   - "## AI Planning:"
+#   - "Planning Output:"
+#
+# Linear user names (exact, case-insensitive) treated as bots — never Decision.
+# Names ending in "bot" are also auto-detected as bots.
+# bot_users:
+#   - "my-orchestrator-bot"
+
 # ---- Trackers to ingest (Linear; Jira planned). tier: primary is bound to ---
 # ---- code_repo; secondary teams ride along. Requires LINEAR_API_KEY. --------
 trackers: []
@@ -56,6 +68,7 @@ secondary_repos: []
 #    path: ../docs
 #    tier: secondary
 #    # docs_url: https://docs.your-project.example.com
+#    # doc_exclude: ["skills/**", "*.mdx"]   # optional: repo-relative path globs never ingested as Doc nodes
 
 # ---- DOCS SITES: crawl published documentation into the graph (KGB-4/KGB-5) -
 # Each entry produces DocSite / DocPage / DocSection spine nodes. Sections get
