@@ -48,9 +48,9 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     # Learnings AND Decisions (ADRs, plans, decision comments) are both surfaced —
     # they are all planning knowledge.
     q = PREFIXES + f"""
-    SELECT DISTINCT ?learning ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?stype {{ kg:Learning kg:Decision }}
-      ?learning a ?stype ; dcterms:title ?title .
+    SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
+      VALUES ?type {{ kg:Learning kg:Decision }}
+      ?learning a ?type ; dcterms:title ?title .
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
       OPTIONAL {{ ?learning kg:fix ?fix }}
@@ -64,8 +64,10 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     by_iri: dict[str, dict] = {}
     for r in store.select(q):
         iri = r["learning"]
+        type_iri = r.get("type") or ""
         rec = by_iri.setdefault(iri, {
             "iri": iri, "title": r.get("title", ""),
+            "type": type_iri.split("#")[-1] if type_iri else None,
             "category": r.get("category"), "priority": r.get("priority"),
             "fix": (r.get("fix") or "")[:400] or None,
             "matched_topics": [],

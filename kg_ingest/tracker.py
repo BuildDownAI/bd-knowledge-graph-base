@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 
 import requests
 from rdflib import Graph, Literal, URIRef
@@ -124,11 +125,37 @@ def _topic(g: Graph, tag: str) -> URIRef:
     return t
 
 
+# ZWJ (U+200D), VS-16 (U+FE0F), combining enclosing keycap (U+20E3)
+_EMOJI_JOINERS = frozenset(["‍", "️", "⃣"])
+
+
+def _is_emoji_token(s: str) -> bool:
+    """Return True if the token consists only of emoji/symbol codepoints."""
+    return bool(s) and all(
+        unicodedata.category(c) in ("So", "Sk", "Sm", "Mn") or c in _EMOJI_JOINERS
+        for c in s
+    )
+
+
 def _first_line(body: str) -> str:
     for line in body.splitlines():
-        s = line.strip().lstrip("#").strip()
-        if s:
-            return s
+        s = line.strip()
+        if not s:
+            continue
+        # Skip whole-line HTML comments (e.g. orchestrator markers like <!-- ai-implement post-push ... -->)
+        if s.startswith("<!--") and s.endswith("-->"):
+            continue
+        if s.startswith("#"):
+            text = s.lstrip("#").strip()
+            if not text:
+                continue
+            # Skip bare one-word headings (Summary, Approach, Checklist, etc.)
+            # Emoji-only tokens don't count as words.
+            words = [w for w in text.split() if not _is_emoji_token(w)]
+            if len(words) <= 1:
+                continue
+            return text
+        return s
     return ""
 
 
@@ -137,10 +164,12 @@ def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str |
     # skills lead the comment with `# ai-implement-build-{up,down}-learnings`.
     # Matching the marker anywhere in the body over-catches planning/summary
     # comments that merely mention it (keeps _classify aligned with _comment_title).
-    first_lower = _first_line(body).lower()
-    if any(m in first_lower for m in _LEARNING_MARKERS):
-        return "learning"
+    # Use the raw first line (not _first_line) so the marker is detected even when
+    # _first_line skips it (a one-word heading like `# ai-implement-build-up-learnings`).
     raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first_lower = raw_first.lstrip("#").strip().lower()
+    if any(m in raw_first_lower for m in _LEARNING_MARKERS):
+        return "learning"
     if raw_first.startswith(_SMOKE_JUMPER_HEADING):
         return "verification"
     # Planning note: first line starts with any heading in the caller-supplied list.
@@ -160,12 +189,14 @@ def _classify_pr_comment(body: str, author_login: str) -> str | None:
     Bot authors (login ends with '[bot]' or is 'ai-implement-orchestrator-bot')
     can be learning or verification but never decision.
     """
-    first = _first_line(body).lower()
-    if any(m in first for m in _LEARNING_MARKERS):
+    # Use raw first line for learning-marker detection so the marker is found even
+    # when _first_line would skip it (e.g. `# ai-implement-kg-refresh-learnings`).
+    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first_lower = raw_first.lstrip("#").strip().lower()
+    if any(m in raw_first_lower for m in _LEARNING_MARKERS):
         return "learning"
     # Verification: smoke-jumper report heading or embedded verdict markers.
     # Exclude status=start progress lines — those are in-progress signals, not reports.
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
     if raw_first.startswith(_SMOKE_JUMPER_HEADING):
         return "verification"
     if "<!-- claude-review-verdict" in body:
@@ -186,15 +217,23 @@ def _comment_title(ident: str, issue_title: str, body: str, kind: str) -> str:
 
     Build-up/down learning comments lead with a marker heading that makes a poor
     title on its own; replace it with "<KEY> build-{up,down} learnings — <issue>".
+    Verification comments with an HTML orchestrator marker get "<ident> review: <first
+    substantive line>" so the title is never just the HTML comment itself.
     """
-    fl = _first_line(body)
-    low = fl.lower()
-    if kind == "learning" and any(m in low for m in _LEARNING_MARKERS):
-        phase = ("build-down learnings" if "build-down" in low
-                 else "build-up learnings" if "build-up" in low
+    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first_lower = raw_first.lstrip("#").strip().lower()
+    if kind == "learning" and any(m in raw_first_lower for m in _LEARNING_MARKERS):
+        phase = ("build-down learnings" if "build-down" in raw_first_lower
+                 else "build-up learnings" if "build-up" in raw_first_lower
                  else "learnings")
         tail = f" — {issue_title}" if issue_title else ""
         return f"{ident} {phase}{tail}"
+    if kind == "verification" and (
+        "<!-- ai-implement post-push" in body or "<!-- claude-review-verdict" in body
+    ):
+        fl = _first_line(body)
+        return f"{ident} review: {fl}" if fl else f"{ident} review"
+    fl = _first_line(body)
     return f"{ident}: {fl}" if fl else f"{ident} note"
 
 

@@ -114,6 +114,20 @@ def test_degraded_lexical_only():
     print("PASS: missing sidecar -> degraded lexical-only")
 
 
+def test_lexical_only_hit_has_type():
+    store, _ = _fixture_store()
+    semantic._index = None
+    r = hybrid.hybrid_search(store, "dedup", npz_path=Path("/nonexistent/x.npz"))
+    assert r["degraded"] is True, r
+    lexical_hits = [x for x in r["results"] if x["matched_by"] == ["lexical"]]
+    assert lexical_hits, f"expected lexical-only hits, got: {r['results']}"
+    assert all(x["type"] is not None for x in lexical_hits), \
+        f"lexical-only hits must have non-null type: {lexical_hits}"
+    hit = next(x for x in lexical_hits if "PROJ-259" in x["iri"])
+    assert hit["type"] == "Learning", f"expected type=Learning, got: {hit['type']}"
+    print(f"PASS: lexical-only hit carries type={hit['type']!r}")
+
+
 def test_paraphrase_via_semantic():
     store, d = _fixture_store()
     build_embeddings(store, out_dir=d)
@@ -156,6 +170,7 @@ def main():
     test_get_store_kg_trig_wins()
     test_hybrid_npz_from_env()
     test_degraded_lexical_only()
+    test_lexical_only_hit_has_type()
     if not HAVE:
         print("SKIP: fastembed not installed — vector arm not exercised"); return
     test_paraphrase_via_semantic()
