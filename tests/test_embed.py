@@ -83,8 +83,18 @@ def test_no_snapshot_dir_writes_to_out_dir_not_snap_dir():
     """build_embeddings(store, out_dir=tmp) must not touch the repo snapshot/."""
     if not HAVE:
         print("SKIP: fastembed not installed"); return
-    import tempfile
+    import hashlib
     from kg_ingest.embed import SNAP_DIR
+
+    def _snap(path: Path):
+        if not path.exists():
+            return (False, None)
+        return (True, hashlib.sha256(path.read_bytes()).hexdigest())
+
+    snap_npz = SNAP_DIR / "embeddings.npz"
+    snap_meta = SNAP_DIR / "embeddings.meta.json"
+    before_npz = _snap(snap_npz)
+    before_meta = _snap(snap_meta)
 
     d = tempfile.mkdtemp()
     trig = os.path.join(d, "g.trig")
@@ -92,8 +102,12 @@ def test_no_snapshot_dir_writes_to_out_dir_not_snap_dir():
     build_embeddings(RdflibStore(trig), out_dir=Path(d))
 
     assert (Path(d) / "embeddings.npz").exists(), "out_dir/embeddings.npz not written"
-    assert not (SNAP_DIR / "embeddings.npz").exists(), (
-        "SNAP_DIR/embeddings.npz was written but should not be when out_dir != OUT_DIR"
+    assert (Path(d) / "embeddings.meta.json").exists(), "out_dir/embeddings.meta.json not written"
+    assert _snap(snap_npz) == before_npz, (
+        f"SNAP_DIR/embeddings.npz changed: was {before_npz}, now {_snap(snap_npz)}"
+    )
+    assert _snap(snap_meta) == before_meta, (
+        f"SNAP_DIR/embeddings.meta.json changed: was {before_meta}, now {_snap(snap_meta)}"
     )
     print("PASS: build_embeddings with out_dir=<tempdir> writes nothing under SNAP_DIR")
 
