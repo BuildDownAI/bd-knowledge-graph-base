@@ -78,5 +78,26 @@ def main():
     print(f"PASS: build_embeddings -> {meta['count']} vectors dim {meta['dim']} "
           f"batch_count {meta['batch_count']} age_stamp {meta['age_stamp']!r}")
 
+
+def test_no_snapshot_dir_writes_to_out_dir_not_snap_dir():
+    """build_embeddings(store, out_dir=tmp) must not touch the repo snapshot/."""
+    if not HAVE:
+        print("SKIP: fastembed not installed"); return
+    import tempfile
+    from kg_ingest.embed import SNAP_DIR
+
+    d = tempfile.mkdtemp()
+    trig = os.path.join(d, "g.trig")
+    Path(trig).write_text(FIXTURE)
+    build_embeddings(RdflibStore(trig), out_dir=Path(d))
+
+    assert (Path(d) / "embeddings.npz").exists(), "out_dir/embeddings.npz not written"
+    assert not (SNAP_DIR / "embeddings.npz").exists(), (
+        "SNAP_DIR/embeddings.npz was written but should not be when out_dir != OUT_DIR"
+    )
+    print("PASS: build_embeddings with out_dir=<tempdir> writes nothing under SNAP_DIR")
+
+
 if __name__ == "__main__":
     main()
+    test_no_snapshot_dir_writes_to_out_dir_not_snap_dir()
