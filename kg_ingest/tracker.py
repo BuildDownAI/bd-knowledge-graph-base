@@ -172,6 +172,15 @@ def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str |
         return "learning"
     if raw_first.startswith(_SMOKE_JUMPER_HEADING):
         return "verification"
+    # Post-push completion marker — shared rule with _classify_pr_comment.
+    # A body that is only a status-progress line is not a report; return None early.
+    stripped = body.strip()
+    if (stripped.startswith("<!--") and stripped.endswith("-->")
+            and "ai-implement post-push status=" in stripped):
+        return None
+    if ("<!-- ai-implement post-push" in body
+            and "<!-- ai-implement post-push status=start" not in body):
+        return "verification"
     # Planning note: first line starts with any heading in the caller-supplied list.
     # "AI Planning:" is injected by _add_issue; _classify itself has no built-in default
     # so existing callers without headings retain the old Decision behaviour.
