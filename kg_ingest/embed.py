@@ -25,7 +25,24 @@ CARD_FIELDS = "title + tags/labels + <=400-char snippet"
 BATCH_SIZE = 64
 
 
-def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path = SNAP_DIR) -> dict:
+def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path | None = None) -> dict:
+    """Build and write embeddings.
+
+    Snapshot directory resolution when ``snapshot_dir`` is ``None``:
+
+    +-----------------+---------------------+------------------------------+
+    | snapshot_dir    | out_dir == OUT_DIR  | snapshot written to          |
+    +=================+=====================+==============================+
+    | None            | True                | SNAP_DIR (production default)|
+    +-----------------+---------------------+------------------------------+
+    | None            | False               | out_dir (caller's directory) |
+    +-----------------+---------------------+------------------------------+
+    | Path (given)    | either              | snapshot_dir (as given)      |
+    +-----------------+---------------------+------------------------------+
+
+    Note: OUT_DIR is a resolved absolute path; callers should also pass
+    absolute paths so the equality check is reliable.
+    """
     import gc
     import numpy as np
     from fastembed import TextEmbedding
@@ -90,6 +107,9 @@ def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path = SNAP_D
     out_dir.mkdir(parents=True, exist_ok=True)
     np.savez(out_dir / "embeddings.npz", **arrays)
     (out_dir / "embeddings.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+    if snapshot_dir is None:
+        snapshot_dir = SNAP_DIR if out_dir == OUT_DIR else out_dir
 
     # Compressed committed snapshot — consumers copy this instead of re-running inference.
     # String columns (snippets) compress especially well; ~2.5 MB vs 12 MB uncompressed.
