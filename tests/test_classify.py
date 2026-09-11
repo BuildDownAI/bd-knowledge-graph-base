@@ -166,3 +166,50 @@ check("add_issue: AI Planning: -> provenance wasGeneratedBy",
       True)
 
 print("\nall KGB-16 tests passed")
+
+# ---- _add_issue round-trip: bot-authored 400+ char comment -> no semantic node ----
+
+_SEMANTIC_TYPES = {KG.Learning, KG.Decision, KG.Constraint, KG.FailureMode,
+                   KG.Observation, KG.Verification, KG.PlanningNote}
+
+spine_g2, run_g2 = _make_graphs()
+run2 = _run_node(run_g2, "test-run-2", "0.0.0-test")
+_add_issue(spine_g2, run_g2, run2, "TEST",
+           {"identifier": "TEST-2", "title": "Test issue",
+            "comments": {"nodes": [{"body": BODY_LONG, "user": {"name": "orchestrator-bot"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=())
+
+cnode2 = iris.comment("TEST-2", 0)
+types_in_run_g2 = set(run_g2.objects(cnode2, RDF.type))
+check("add_issue: bot-named author 400+ chars -> no Decision in run_g",
+      KG.Decision not in types_in_run_g2,
+      True)
+check("add_issue: bot-named author 400+ chars -> no semantic node type in run_g",
+      types_in_run_g2.isdisjoint(_SEMANTIC_TYPES),
+      True)
+
+# Also verify with a name in the bot_users set rather than name-heuristic
+spine_g3, run_g3 = _make_graphs()
+run3 = _run_node(run_g3, "test-run-3", "0.0.0-test")
+_add_issue(spine_g3, run_g3, run3, "TEST",
+           {"identifier": "TEST-3", "title": "Test issue",
+            "comments": {"nodes": [{"body": BODY_LONG, "user": {"name": "ai-orchestrator"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=(),
+           bot_users={"ai-orchestrator"})
+
+cnode3 = iris.comment("TEST-3", 0)
+types_in_run_g3 = set(run_g3.objects(cnode3, RDF.type))
+check("add_issue: bot_users-listed author 400+ chars -> no Decision in run_g",
+      KG.Decision not in types_in_run_g3,
+      True)
+check("add_issue: bot_users-listed author 400+ chars -> no semantic node type in run_g",
+      types_in_run_g3.isdisjoint(_SEMANTIC_TYPES),
+      True)
+
+print("\nall bot-suppression round-trip tests passed")
