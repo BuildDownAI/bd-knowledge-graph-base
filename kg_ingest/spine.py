@@ -5,6 +5,7 @@ emitting RDF into the spine named graph. Re-derivable: same repo state -> same t
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import subprocess
 from pathlib import Path
@@ -141,6 +142,7 @@ def _link_tracker(g: Graph, node: URIRef, text: str, stats: dict) -> None:
 def add_spine(g: Graph, repo_path: Path, repo_slug: str,
               max_commits: int | None = 500, max_prs: int = 60,
               docs_url: str | None = None,
+              doc_exclude: list[str] | None = None,
               pipeline_ver: str = "0.1.0") -> dict:
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
@@ -165,6 +167,11 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
             continue
         suffix = Path(rel).suffix.lower()
         is_doc = suffix in DOC_SUFFIXES
+        # fnmatch * matches any character including /, so "sub/**" and "*.mdx"
+        # both work as expected — same contract as docsite._path_matches_any.
+        if is_doc and doc_exclude and any(fnmatch.fnmatch(rel, p) for p in doc_exclude):
+            stats["docs_excluded"] = stats.get("docs_excluded", 0) + 1
+            continue
         node = iris.doc(repo_slug, rel) if is_doc else iris.file(repo_slug, rel)
         g.add((node, RDF.type, KG.Doc if is_doc else KG.File))
         g.add((node, KG.path, Literal(rel)))

@@ -255,7 +255,8 @@ def main(argv=None) -> int:
     print("== spine ingest ==")
     s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
                               max_commits=max_commits, max_prs=args.max_prs,
-                              docs_url=_code_repo_cfg.get("docs_url"))
+                              docs_url=_code_repo_cfg.get("docs_url"),
+                              doc_exclude=_code_repo_cfg.get("doc_exclude"))
     for k, v in s_stats.items():
         print(f"   {k}: {v}")
 
@@ -312,7 +313,8 @@ def main(argv=None) -> int:
             print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
             ss = spine.add_spine(spine_g, sec_path, sec_slug,
                                  max_commits=max_commits, max_prs=args.max_prs,
-                                 docs_url=entry.get("docs_url"))
+                                 docs_url=entry.get("docs_url"),
+                                 doc_exclude=entry.get("doc_exclude"))
             for k, v in ss.items():
                 print(f"   {k}: {v}")
             sec_fp = iris.content_hash(sec_slug)

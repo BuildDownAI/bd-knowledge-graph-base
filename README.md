@@ -63,6 +63,10 @@ console scripts in the venv — **`kg-ingest`** (`build` / `embed` / `snapshot` 
 `python -m kg_ingest.<module>` / `python -m kg_query.<module>` forms still work,
 and `PYTHONPATH=.` is no longer needed anywhere.
 
+## Source references
+
+Each `code_repo` and `secondary_repos[]` entry in `sources.yml` accepts an optional `doc_exclude` field (a list of repo-relative path globs) to suppress specific files from being ingested as `kg:Doc` nodes — useful when a repo keeps duplicate doc copies (e.g., `stable/` and `latest/`) and you only want one indexed.
+
 ## Layout
 
 ```
