@@ -1,0 +1,9 @@
+{
+  "model": "BAAI/bge-small-en-v1.5",
+  "dim": 384,
+  "count": 3,
+  "built_from_quads": 16,
+  "card_fields": "title + tags/labels + <=400-char snippet",
+  "batch_count": 1,
+  "age_stamp": ""
+}
