@@ -166,3 +166,114 @@ check("add_issue: AI Planning: -> provenance wasGeneratedBy",
       True)
 
 print("\nall KGB-16 tests passed")
+
+# ---- _classify: post-push Verification rule shared with issue-comment path ----
+
+# (a) post-push marker without status=start -> verification
+check("issue: post-push marker -> verification",
+      _classify("<!-- ai-implement post-push -->\nPushed fix."),
+      "verification")
+
+# (b) body that is only a status=start line -> None (not verification)
+check("issue: only status=start line -> None",
+      _classify("<!-- ai-implement post-push status=start -->"),
+      None)
+
+# ---- _add_issue round-trip: post-push body -> kg:Verification ----
+
+_postpush_body = "<!-- ai-implement post-push -->\nAll changes pushed and verified."
+
+spine_g_pp, run_g_pp = _make_graphs()
+run_pp = _run_node(run_g_pp, "test-run-pp", "0.0.0-test")
+_add_issue(spine_g_pp, run_g_pp, run_pp, "TEST",
+           {"identifier": "TEST-PP", "title": "Test issue",
+            "comments": {"nodes": [{"body": _postpush_body, "user": {"name": "ai-implement-bot"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=())
+
+cnode_pp = iris.comment("TEST-PP", 0)
+check("add_issue: post-push marker -> kg:Verification in run_g",
+      KG.Verification in set(run_g_pp.objects(cnode_pp, RDF.type)),
+      True)
+check("add_issue: post-push marker -> provenance wasDerivedFrom",
+      (cnode_pp, PROV.wasDerivedFrom, iris.tracker_issue("TEST-PP")) in run_g_pp,
+      True)
+check("add_issue: post-push marker -> provenance wasGeneratedBy",
+      len(list(run_g_pp.objects(cnode_pp, PROV.wasGeneratedBy))) >= 1,
+      True)
+
+# ---- _add_issue round-trip: smoke-jumper heading on issue -> kg:Verification ----
+
+_smoke_body = "## \U0001f525 Smoke-Jumper Report\n\nAll systems nominal. No regressions found."
+
+spine_g_sm, run_g_sm = _make_graphs()
+run_sm = _run_node(run_g_sm, "test-run-sm", "0.0.0-test")
+_add_issue(spine_g_sm, run_g_sm, run_sm, "TEST",
+           {"identifier": "TEST-SM", "title": "Test issue",
+            "comments": {"nodes": [{"body": _smoke_body, "user": {"name": "smoke-jumper-bot"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=())
+
+cnode_sm = iris.comment("TEST-SM", 0)
+check("add_issue: smoke-jumper heading -> kg:Verification in run_g",
+      KG.Verification in set(run_g_sm.objects(cnode_sm, RDF.type)),
+      True)
+check("add_issue: smoke-jumper heading -> provenance wasDerivedFrom",
+      (cnode_sm, PROV.wasDerivedFrom, iris.tracker_issue("TEST-SM")) in run_g_sm,
+      True)
+check("add_issue: smoke-jumper heading -> provenance wasGeneratedBy",
+      len(list(run_g_sm.objects(cnode_sm, PROV.wasGeneratedBy))) >= 1,
+      True)
+
+print("\nall Verification round-trip tests passed")
+
+# ---- _add_issue round-trip: bot-authored 400+ char comment -> no semantic node ----
+
+_SEMANTIC_TYPES = {KG.Learning, KG.Decision, KG.Constraint, KG.FailureMode,
+                   KG.Observation, KG.Verification, KG.PlanningNote}
+
+spine_g2, run_g2 = _make_graphs()
+run2 = _run_node(run_g2, "test-run-2", "0.0.0-test")
+_add_issue(spine_g2, run_g2, run2, "TEST",
+           {"identifier": "TEST-2", "title": "Test issue",
+            "comments": {"nodes": [{"body": BODY_LONG, "user": {"name": "orchestrator-bot"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=())
+
+cnode2 = iris.comment("TEST-2", 0)
+types_in_run_g2 = set(run_g2.objects(cnode2, RDF.type))
+check("add_issue: bot-named author 400+ chars -> no Decision in run_g",
+      KG.Decision not in types_in_run_g2,
+      True)
+check("add_issue: bot-named author 400+ chars -> no semantic node type in run_g",
+      types_in_run_g2.isdisjoint(_SEMANTIC_TYPES),
+      True)
+
+# Also verify with a name in the bot_users set rather than name-heuristic
+spine_g3, run_g3 = _make_graphs()
+run3 = _run_node(run_g3, "test-run-3", "0.0.0-test")
+_add_issue(spine_g3, run_g3, run3, "TEST",
+           {"identifier": "TEST-3", "title": "Test issue",
+            "comments": {"nodes": [{"body": BODY_LONG, "user": {"name": "ai-orchestrator"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+            "comment_planning_notes": 0, "comment_verifications": 0},
+           headings=(),
+           bot_users={"ai-orchestrator"})
+
+cnode3 = iris.comment("TEST-3", 0)
+types_in_run_g3 = set(run_g3.objects(cnode3, RDF.type))
+check("add_issue: bot_users-listed author 400+ chars -> no Decision in run_g",
+      KG.Decision not in types_in_run_g3,
+      True)
+check("add_issue: bot_users-listed author 400+ chars -> no semantic node type in run_g",
+      types_in_run_g3.isdisjoint(_SEMANTIC_TYPES),
+      True)
+
+print("\nall bot-suppression round-trip tests passed")
