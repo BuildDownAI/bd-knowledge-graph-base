@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 import subprocess
+import time
 from pathlib import Path
 
 from rdflib import Graph, Literal, URIRef
@@ -24,6 +26,23 @@ FOAF = Namespace("http://xmlns.com/foaf/0.1/")
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt"}
 
 _MAX_PR_COMMENTS = 50
+
+# Retry delays (seconds) for rate-limited PR comment fetches.
+# Injectable for tests: monkeypatch spine._RETRY_DELAYS = (0, 0, 0).
+_RETRY_DELAYS: tuple[int, ...] = (5, 15, 45)
+
+
+class PRCommentsIncomplete(Exception):
+    """Raised by add_spine when PR comment fetch errors exceed the safe threshold.
+
+    Carries the partially-built stats dict (pr_comments and pr_comment_errors
+    already formatted) so cli.py can print them before exiting non-zero.
+    """
+    def __init__(self, stats: dict) -> None:
+        self.stats = stats
+        super().__init__(
+            f"KG_PR_COMMENTS_INCOMPLETE: {stats.get('pr_comment_errors', 'N/A')}"
+        )
 
 # Doc pages get a real title + snippet at spine time (AII-345) so they can be
 # embedded as search cards — a Doc node that is only a path is invisible to
@@ -217,6 +236,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
     if max_prs:
         _pr_run_id = iris.stable_run_id(pipeline_ver, repo_slug + ":pr-comments")
         _pr_run = _pr_comment_run_node(g, _pr_run_id, pipeline_ver)
+        _pr_errors: list[str] = []
+        _has_rate_limit_error = False
         try:
             raw = subprocess.run(
                 ["gh", "pr", "list", "--repo", repo_slug, "--state", "all",
@@ -239,18 +260,52 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                 _link_tracker(g, pnode, f"{pr.get('title') or ''} {pr.get('body') or ''}", stats)
                 people.add(login)
                 stats["prs"] += 1
-                try:
-                    raw_c = subprocess.run(
-                        ["gh", "api", "--paginate",
-                         f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
-                        capture_output=True, text=True, check=True, cwd=str(repo_path),
-                    ).stdout
-                    comments = json.loads(raw_c)[:_MAX_PR_COMMENTS]
-                except (subprocess.CalledProcessError, json.JSONDecodeError,
-                        FileNotFoundError) as ce:
-                    comments = []
-                    stats.setdefault("pr_comment_errors", []).append(str(ce)[:200])
+
+                # Fetch PR comments with retry on rate-limit errors.
+                comments: list[dict] = []
+                err_text: str | None = None
+                for _attempt in range(len(_RETRY_DELAYS) + 1):
+                    try:
+                        raw_c = subprocess.run(
+                            ["gh", "api", "--paginate",
+                             f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
+                            capture_output=True, text=True, check=True, cwd=str(repo_path),
+                        ).stdout
+                        comments = json.loads(raw_c)[:_MAX_PR_COMMENTS]
+                        err_text = None
+                        break
+                    except (subprocess.CalledProcessError, json.JSONDecodeError,
+                            FileNotFoundError) as exc:
+                        stderr = getattr(exc, "stderr", None) or ""
+                        err_text = stderr or str(exc)
+                        is_rate_limit = (
+                            "rate limit" in err_text.lower()
+                            or "abuse" in err_text.lower()
+                        )
+                        if is_rate_limit:
+                            _has_rate_limit_error = True
+                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
+                            m = re.search(r"retry.?after[:\s]+(\d+)", err_text, re.IGNORECASE)
+                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
+                            time.sleep(wait)
+                        else:
+                            break
+
+                if err_text is not None:
+                    _pr_errors.append(err_text[:300])
+
                 _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
+
+            # Format and check error threshold after the PR loop.
+            if _pr_errors:
+                stats["pr_comment_errors"] = (
+                    f"{len(_pr_errors)} (first: {_pr_errors[0][:120]})"
+                )
+            if _pr_errors and stats["prs"] > 0:
+                if _has_rate_limit_error or len(_pr_errors) / stats["prs"] > 0.10:
+                    stats["people"] = len(people)
+                    raise PRCommentsIncomplete(stats)
+
         except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
             stats["pr_error"] = str(e)[:200]
 

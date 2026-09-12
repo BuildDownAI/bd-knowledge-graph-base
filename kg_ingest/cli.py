@@ -253,12 +253,18 @@ def main(argv=None) -> int:
 
     _code_repo_cfg = _src_cfg.get("code_repo") or {}
     print("== spine ingest ==")
-    s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
-                              max_commits=max_commits, max_prs=args.max_prs,
-                              docs_url=_code_repo_cfg.get("docs_url"),
-                              doc_exclude=_code_repo_cfg.get("doc_exclude"))
-    for k, v in s_stats.items():
-        print(f"   {k}: {v}")
+    try:
+        s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
+                                  max_commits=max_commits, max_prs=args.max_prs,
+                                  docs_url=_code_repo_cfg.get("docs_url"),
+                                  doc_exclude=_code_repo_cfg.get("doc_exclude"))
+        for k, v in s_stats.items():
+            print(f"   {k}: {v}")
+    except spine.PRCommentsIncomplete as exc:
+        for k, v in exc.stats.items():
+            print(f"   {k}: {v}")
+        print("KG_PR_COMMENTS_INCOMPLETE")
+        return 1
 
     # ---- docs_sites: crawl published documentation into the spine graph ----
     _docs_sites = _src_cfg.get("docs_sites") or []
@@ -311,12 +317,18 @@ def main(argv=None) -> int:
                 continue
             sec_slug = entry["slug"]
             print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
-            ss = spine.add_spine(spine_g, sec_path, sec_slug,
-                                 max_commits=max_commits, max_prs=args.max_prs,
-                                 docs_url=entry.get("docs_url"),
-                                 doc_exclude=entry.get("doc_exclude"))
-            for k, v in ss.items():
-                print(f"   {k}: {v}")
+            try:
+                ss = spine.add_spine(spine_g, sec_path, sec_slug,
+                                     max_commits=max_commits, max_prs=args.max_prs,
+                                     docs_url=entry.get("docs_url"),
+                                     doc_exclude=entry.get("doc_exclude"))
+                for k, v in ss.items():
+                    print(f"   {k}: {v}")
+            except spine.PRCommentsIncomplete as exc:
+                for k, v in exc.stats.items():
+                    print(f"   {k}: {v}")
+                print("KG_PR_COMMENTS_INCOMPLETE")
+                return 1
             sec_fp = iris.content_hash(sec_slug)
             sec_run_id = iris.stable_run_id(args.pipeline_ver, sec_fp)
             sec_run_g = ds.graph(iris.run_graph(sec_run_id))
@@ -338,10 +350,16 @@ def main(argv=None) -> int:
         except Exception:
             self_slug = "local/knowledge-graph"
         print(f"== self-ingest: {self_slug} ({self_root}) ==")
-        ss = spine.add_spine(spine_g, self_root, self_slug,
-                             max_commits=max_commits, max_prs=args.max_prs)
-        for k, v in ss.items():
-            print(f"   {k}: {v}")
+        try:
+            ss = spine.add_spine(spine_g, self_root, self_slug,
+                                 max_commits=max_commits, max_prs=args.max_prs)
+            for k, v in ss.items():
+                print(f"   {k}: {v}")
+        except spine.PRCommentsIncomplete as exc:
+            for k, v in exc.stats.items():
+                print(f"   {k}: {v}")
+            print("KG_PR_COMMENTS_INCOMPLETE")
+            return 1
         self_fp = iris.content_hash(f"self:{self_slug}")
         self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
         self_run_g = ds.graph(iris.run_graph(self_run_id))
