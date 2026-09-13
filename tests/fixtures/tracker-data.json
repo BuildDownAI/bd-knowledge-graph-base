@@ -1,0 +1,186 @@
+[
+  {
+    "identifier": "TEST-1",
+    "title": "Build-up learning: cache TTL should be configurable",
+    "comments": {
+      "nodes": [
+        {
+          "body": "# ai-implement-build-up-learnings\n\nFeature: cache TTL configuration\n\nThe build-up phase revealed that the cache TTL needs to be configurable per endpoint. We initially hard-coded 60 seconds but production traffic showed we need per-endpoint control. The fix is a YAML key `cache_ttl_seconds` per route.",
+          "user": {"name": "alice"}
+        },
+        {
+          "body": "lgtm",
+          "user": {"name": "bob"}
+        }
+      ]
+    },
+    "labels": {"nodes": [{"name": "learning"}]},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-2",
+    "title": "Build-down learning: pin API version before build-down",
+    "comments": {
+      "nodes": [
+        {
+          "body": "ai-implement-build-down-learnings\n\nThe implementation diverged from the plan at step 3 because the upstream API changed its response schema. Next time, pin the API version in the fixture before the build-down phase begins. This prevented a clean golden test run until we updated the snapshot.",
+          "user": {"name": "bob"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-3",
+    "title": "Snapshot-delta test planning",
+    "comments": {
+      "nodes": [
+        {
+          "body": "AI Planning: Sprint scope\n\nWe will implement the snapshot-delta test in three steps. Step 1: create the fixture tracker-data file covering all classifier branches. Step 2: write the test script that ingests fixture and compares to golden. Step 3: run with --write and commit the golden. The risk is non-determinism in commit SHAs but line counts are stable. Mitigation: use a deterministic run ID so the run node IRI is stable across invocations.",
+          "user": {"name": "ai-implement-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-4",
+    "title": "Implementation summary (via key heading)",
+    "comments": {
+      "nodes": [
+        {
+          "body": "## TEST-4 Implementation Summary\n\nAdded the snapshot-delta test with golden file regeneration via --write flag.\n\n## Test plan\n\n- Run with --write to generate golden\n- Run without flags to verify\n- Change a classifier constant and confirm the test fails with the delta table",
+          "user": {"name": "ai-implement-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-5",
+    "title": "Smoke report: golden test verified",
+    "comments": {
+      "nodes": [
+        {
+          "body": "## 🔥 Smoke-Jumper Report\n\nAll smoke tests passed. The golden snapshot test exits 0 under both default and custom namespace. No regressions detected in the classifier paths.",
+          "user": {"name": "smoke-jumper-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-6",
+    "title": "Golden file format: JSON vs YAML vs CSV",
+    "comments": {
+      "nodes": [
+        {
+          "body": "After reviewing the proposed approach, I recommend we keep the golden file checked into the repository rather than generating it at CI startup. The checked-in file gives reviewers a diff surface: when a classifier change lands, the PR must also include an updated snapshot-golden.json, making the impact immediately visible. The alternative of generating at test time and comparing to a reference stored in environment variables hides the delta from PR reviewers. The checked-in approach also supports the offline workflow: a developer can run the test locally without network access and still get the correct verdict. One concern is that the golden must be regenerated deliberately via the --write flag rather than automatically on every test run. We address this by making the --write path the only sanctioned update mechanism and documenting it in the error message printed on failure.",
+          "user": {"name": "carol"}
+        }
+      ]
+    },
+    "labels": {"nodes": [{"name": "architecture"}]},
+    "project": {"name": "KG Base"},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-7",
+    "title": "Bot failure note (suppressed — no special pattern)",
+    "comments": {
+      "nodes": [
+        {
+          "body": "The implementation attempt failed due to an import error. The test script could not locate the kg_ingest module because PYTHONPATH was not set in the runner environment. The pipeline runner has been updated to always prepend the repo root to PYTHONPATH before executing test scripts. This comment is from the bot run and does not carry a learning marker, implementation summary heading, or smoke-jumper heading, so it is classified as None and dropped from the graph. It is included in the fixture to verify that the bot-suppression path works correctly and does not inflate the comment part line count beyond what the real classified comments produce.",
+          "user": {"name": "ai-implement-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-8",
+    "title": "Snapshot guard: kg-refresh learning",
+    "comments": {
+      "nodes": [
+        {
+          "body": "# ai-implement-kg-refresh-learnings\n\nThe kg-refresh run revealed that the snapshot guard rule fires correctly when comment.nt shrinks. The zero-shrink rule prevented a silent data loss when the tracker API returned an empty page due to a transient network error. The fix is to always check issue_count before applying the zero-shrink threshold.",
+          "user": {"name": "refresh-bot"}
+        },
+        {
+          "body": "<!-- orchestrator context: TEST-8 review -->\n\nAfter reviewing the guard integration, the team agreed that the zero-shrink rule should apply only when the tracker returns at least one issue, not when the issue count is zero. This decision preserves backward compatibility for repos that do not configure a tracker team in sources.yml, where every run would otherwise fail the zero-shrink check. The threshold-only rule still applies to code-derived parts such as commit.nt and file.nt, which can legitimately shrink when commits are pruned or files are deleted. This distinction between tracker-derived and code-derived parts is the key architectural decision here.",
+          "user": {"name": "dave"}
+        }
+      ]
+    },
+    "labels": {"nodes": [{"name": "snapshot"}]},
+    "project": {"name": "KG Base"},
+    "relations": {"nodes": [{"type": "blocks", "relatedIssue": {"identifier": "TEST-1"}}]}
+  },
+  {
+    "identifier": "TEST-9",
+    "title": "Short comments are suppressed",
+    "comments": {
+      "nodes": [
+        {
+          "body": "lgtm",
+          "user": {"name": "alice"}
+        },
+        {
+          "body": "agreed",
+          "user": {"name": "bob"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-10",
+    "title": "Implementation note via Summary+Approach headings",
+    "comments": {
+      "nodes": [
+        {
+          "body": "## Summary\n\nThis PR adds the golden snapshot-delta test to the base template. The test ingests the fixture repo and fixture tracker data, runs write_parts into a temp dir, and diffs the line counts against the checked-in golden table.\n\n## Approach\n\nUsed _make_fixture_repo from test_spine.py to create a deterministic git repo. Called _add_issue directly to avoid needing a LINEAR_API_KEY. The --write flag regenerates the golden file deterministically.",
+          "user": {"name": "ai-implement-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-11",
+    "title": "Verification: --write produces byte-identical output",
+    "comments": {
+      "nodes": [
+        {
+          "body": "## 🔥 Smoke-Jumper Report\n\nVerification complete. The --write flag produces byte-identical output on two consecutive runs. The test exits 0 under the default namespace and under the custom namespace injected by test.yml via sed substitution in sources.yml.",
+          "user": {"name": "smoke-jumper-bot"}
+        }
+      ]
+    },
+    "labels": {"nodes": []},
+    "parent": {"identifier": "TEST-6"},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "TEST-12",
+    "title": "Decision: golden key format uses .nt extension",
+    "state": {"name": "Done", "type": "completed"},
+    "comments": {
+      "nodes": [
+        {
+          "body": "We decided to use a JSON file for the golden table with keys in the format `part.nt` rather than bare part names. This matches the filename convention in snapshot/parts/ and makes the table directly readable as a map from filename to line count. JSON is already parsed by the Python stdlib without any additional dependency, it round-trips cleanly through json.dumps with sort_keys=True and indent=2, and it is already familiar to contributors who read the tracker-data fixture. YAML would require PyYAML which is not in requirements.txt. CSV would complicate the key structure and require a custom parser. The JSON approach produces the simplest possible diff when the golden changes: each line is exactly one key-value pair, so a change to one snapshot part shows as exactly one changed line in the pull request diff.",
+          "user": {"name": "eve"}
+        }
+      ]
+    },
+    "labels": {"nodes": [{"name": "snapshot"}, {"name": "architecture"}]},
+    "relations": {"nodes": []}
+  }
+]
