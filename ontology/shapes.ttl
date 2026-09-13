@@ -14,7 +14,7 @@
 kg:SemanticNodeShape a sh:NodeShape ;
     sh:targetClass kg:Learning, kg:Decision, kg:Constraint,
                    kg:FailureMode, kg:Observation, kg:Verification,
-                   kg:PlanningNote ;
+                   kg:PlanningNote, kg:ImplementationNote ;
     sh:property [
         sh:path prov:wasDerivedFrom ;
         sh:minCount 1 ;
@@ -111,6 +111,16 @@ kg:PlanningNoteShape a sh:NodeShape ;
         sh:minCount 1 ;
         sh:datatype xsd:string ;
         sh:message "planning note must have a dcterms:title" ;
+    ] .
+
+# ImplementationNote shape (KGB-24): bot implementation summary — requires a title.
+kg:ImplementationNoteShape a sh:NodeShape ;
+    sh:targetClass kg:ImplementationNote ;
+    sh:property [
+        sh:path dcterms:title ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "implementation note must have a dcterms:title" ;
     ] .
 
 # MCP-source spine shape (KGB-12). Distinct class from DocSite — not retrofitted.
