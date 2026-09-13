@@ -67,6 +67,8 @@ kg:Observation  rdfs:subClassOf kg:SemanticNode .
 kg:Verification  rdfs:subClassOf kg:SemanticNode .
 kg:PlanningNote  a owl:Class ; rdfs:label "Planning note (orchestrator planning output)" .
 kg:PlanningNote  rdfs:subClassOf kg:SemanticNode .
+kg:ImplementationNote  a owl:Class ; rdfs:label "Implementation note (bot account of what a run implemented)" .
+kg:ImplementationNote  rdfs:subClassOf kg:SemanticNode .
 
 ####################  PROVENANCE / VERSIONING  ####################
 
