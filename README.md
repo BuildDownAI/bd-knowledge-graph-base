@@ -81,6 +81,15 @@ pyproject.toml         # canonical dependency list (uv; uv.lock pins the resolve
 setup.sh               # one-shot: venv (uv or pip) + deps + build
 ```
 
+### Design docs index
+
+| Doc | Topic |
+|---|---|
+| [ingest.md](docs/design/ingest.md) | Spine + semantic ingest pipeline |
+| [semantic-search.md](docs/design/semantic-search.md) | Semantic search design |
+| [hybrid-search.md](docs/design/hybrid-search.md) | Hybrid search (lexical + vector, RRF) |
+| [snapshot-guard.md](docs/design/snapshot-guard.md) | Snapshot guard rule (`kg-ingest guard`) |
+
 ## Keeping a downstream KG current
 
 Your KG repo should track this base via a git remote (forks of a public repo
