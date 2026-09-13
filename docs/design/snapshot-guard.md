@@ -64,3 +64,39 @@ There is no `--force` flag in `kg-ingest guard`.  The guard's job is to catch
 accidents; intentional changes go through the baseline process.
 
 [aii628]: https://linear.app/eudoxus/issue/AII-628
+
+## Golden table: how to read a delta, when to update it
+
+`tests/fixtures/snapshot-golden.json` is a checked-in map of `"<part>.nt": <line-count>`
+for a full ingest of the fixture repo plus `tests/fixtures/tracker-data.json` under the
+default namespace. `tests/test_snapshot_delta.py` compares the actual line counts from a
+fresh ingest to this table; any difference fails the test with a printed delta table:
+
+```
+part           golden   actual    delta
+--------------------------------------
+comment.nt         80       58      -22
+person.nt          19       13       -6
+```
+
+**How to read the delta.** Each row names the part whose line count changed. A negative
+delta means triples were removed (e.g. a classifier no longer emits certain comment nodes);
+a positive delta means new triples were added. The delta directly corresponds to the change
+in `snapshot/parts/<part>.nt` that will land in the downstream KG repos after the next
+refresh.
+
+**When to update the golden.** Any PR that changes a classifier outcome, adds a new
+comment kind, or modifies the fixture data must also update the golden by running:
+
+```
+PYTHONPATH=. python tests/test_snapshot_delta.py --write
+```
+
+This is the only sanctioned way to change `snapshot-golden.json`. The PR body must state
+the snapshot delta (the `part | golden | actual | delta` table from the failing test output)
+so reviewers can see the impact at a glance.
+
+**PR-derived parts are absent from the fixture golden by design.** The test calls
+`add_spine(..., max_prs=0)`, so no `pr.nt` part appears in the fixture golden. This
+is intentional — PR ingestion requires `gh` and live GitHub access, which are not
+available in the unit-test environment.
