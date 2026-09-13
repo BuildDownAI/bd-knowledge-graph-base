@@ -7,6 +7,7 @@ Subcommands wrap the existing modules, which all stay runnable directly via
   kg-ingest embed            rebuild only the embeddings sidecar (kg_ingest.embed)
   kg-ingest snapshot         regenerate snapshot/ from out/graph.trig (kg_ingest.snapshot)
   kg-ingest materialize      reconstitute out/graph.trig from snapshot/ (kg_ingest.materialize)
+  kg-ingest guard [flags]    evaluate snapshot/parts line-count changes (kg_ingest.guard)
 
 `kg-ingest --repo ...` without a subcommand is shorthand for `build`.
 Run `kg-ingest <subcommand> -h` for that subcommand's flags.
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import sys
 
-_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize")
+_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize", "guard")
 
 
 def main(argv=None) -> int:
@@ -39,8 +40,11 @@ def main(argv=None) -> int:
         from . import snapshot
         snapshot.main()
         return 0
-    from . import materialize
-    return materialize.main(rest) or 0
+    if cmd == "materialize":
+        from . import materialize
+        return materialize.main(rest) or 0
+    from . import guard
+    return guard.main(rest) or 0
 
 
 if __name__ == "__main__":
