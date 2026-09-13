@@ -150,7 +150,8 @@ _add_issue(spine_g, run_g, run, "TEST",
             "comments": {"nodes": [{"body": _planning_body, "user": {"name": "orchestrator"}}]},
             "labels": {"nodes": []}, "relations": {"nodes": []}},
            {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
-            "comment_planning_notes": 0, "comment_verifications": 0},
+            "comment_planning_notes": 0, "comment_verifications": 0,
+            "comment_implementation_notes": 0},
            headings=("AI Planning:",))
 
 cnode = iris.comment("TEST-1", 0)
@@ -166,3 +167,69 @@ check("add_issue: AI Planning: -> provenance wasGeneratedBy",
       True)
 
 print("\nall KGB-16 tests passed")
+
+# ---- _classify: KGB-24 ImplementationNote cases ----
+
+# Bot implementation summary via _first_line ("## KEY Implementation Summary")
+check("bot: implementation summary -> implementation_note",
+      _classify("## BDS-47 Implementation Summary\n\nFixed the rail.", is_bot=True),
+      "implementation_note")
+
+# Bot implementation summary via "## Summary" + "## Approach" heading
+check("bot: ## Summary + ## Approach -> implementation_note",
+      _classify("## Summary\n\nWe changed the loader.\n\n## Approach\n\nReplace X with Y.",
+                is_bot=True),
+      "implementation_note")
+
+# Bot implementation summary via "## Summary" + "## Test plan" heading
+check("bot: ## Summary + ## Test plan -> implementation_note",
+      _classify("## Summary\n\nAdded caching.\n\n## Test plan\n\n- Run tests.", is_bot=True),
+      "implementation_note")
+
+# Bot "Implementation failed" note -> None (does not match "Implementation Summary")
+check('bot: "Implementation failed" -> None',
+      _classify("## Implementation failed\n\nBuild error on line 42.", is_bot=True),
+      None)
+
+# Human >=400-char comment -> decision (unchanged)
+check("human >=400 -> decision",
+      _classify(BODY_LONG, is_bot=False),
+      "decision")
+
+# _comment_title for implementation_note
+impl_title = _comment_title("BDS-47", "Some issue title",
+                            "## BDS-47 Implementation Summary\n\nFixed the rail.",
+                            "implementation_note")
+check("comment_title: implementation_note -> '<ident> implementation summary'",
+      impl_title, "BDS-47 implementation summary")
+
+# _add_issue round-trip: implementation summary -> kg:ImplementationNote
+_impl_body = "## BDS-47 Implementation Summary\n\nFixed the rail ingest path."
+
+spine_g2, run_g2 = _make_graphs()
+run2 = _run_node(run_g2, "test-run-impl", "0.0.0-test")
+stats2 = {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+          "comment_planning_notes": 0, "comment_verifications": 0,
+          "comment_implementation_notes": 0}
+_add_issue(spine_g2, run_g2, run2, "TEST",
+           {"identifier": "BDS-47", "title": "Rail issue",
+            "comments": {"nodes": [{"body": _impl_body,
+                                    "user": {"name": "ai-implement-bot"}}]},
+            "labels": {"nodes": []}, "relations": {"nodes": []}},
+           stats2,
+           headings=("AI Planning:",),
+           bot_users={"ai-implement-bot"})
+
+cnode2 = iris.comment("BDS-47", 0)
+types_in_run_g2 = set(run_g2.objects(cnode2, RDF.type))
+check("add_issue: impl summary -> kg:ImplementationNote in run_g",
+      KG.ImplementationNote in types_in_run_g2,
+      True)
+check("add_issue: impl summary -> provenance wasDerivedFrom",
+      (cnode2, PROV.wasDerivedFrom, iris.tracker_issue("BDS-47")) in run_g2,
+      True)
+check("add_issue: impl summary -> comment_implementation_notes stat",
+      stats2["comment_implementation_notes"],
+      1)
+
+print("\nall KGB-24 tests passed")
