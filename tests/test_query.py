@@ -33,6 +33,14 @@ FIXTURE = f"""
     kg:tagged <{NS}resource/topic/webhook> ;
     prov:wasDerivedFrom <{NS}resource/doc/example/webhook-retries> ;
     prov:wasGeneratedBy <{NS}resource/run/testrun> .
+  <{NS}resource/comment/TEST-1/1> a kg:ImplementationNote ;
+    dcterms:title "TEST-1 implementation summary" ;
+    prov:wasDerivedFrom <{NS}resource/doc/example/webhook-retries> ;
+    prov:wasGeneratedBy <{NS}resource/run/testrun> .
+  <{NS}resource/comment/TEST-2/1> a kg:PlanningNote ;
+    dcterms:title "TEST-2 planning" ;
+    prov:wasDerivedFrom <{NS}resource/doc/example/webhook-retries> ;
+    prov:wasGeneratedBy <{NS}resource/run/testrun> .
 }}
 """
 
@@ -48,6 +56,18 @@ def main():
     assert r["count"] > 0, "expected the webhook learning"
     hit = r["results"][0]
     print(f"  - {hit['title'][:70]}  via {hit['matched_topics']}")
+
+    print("== kg_search('implementation summary') — ImplementationNote ==")
+    r_impl = queries.kg_search(rd, "implementation summary", limit=5)
+    impl_hits = [x for x in r_impl["results"] if x["type"] == "ImplementationNote"]
+    assert impl_hits, f"expected an ImplementationNote hit, got: {r_impl['results']}"
+    print(f"  - {impl_hits[0]['title'][:70]}  type={impl_hits[0]['type']}")
+
+    print("== kg_search('planning') — PlanningNote ==")
+    r_plan = queries.kg_search(rd, "planning", limit=5)
+    plan_hits = [x for x in r_plan["results"] if x["type"] == "PlanningNote"]
+    assert plan_hits, f"expected a PlanningNote hit, got: {r_plan['results']}"
+    print(f"  - {plan_hits[0]['title'][:70]}  type={plan_hits[0]['type']}")
 
     print("== kg_provenance(hit) ==")
     prov = queries.kg_provenance(rd, hit["iri"])

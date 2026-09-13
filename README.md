@@ -16,9 +16,9 @@ a `knowledge-graph-<your-project>` repo in minutes.
     git/GitHub, plus tracker issues/projects and their relation graph
     (parent/blocks/related) from the Linear API.
   - **Semantic** (parsed, always provenanced): learnings and decisions from your
-    docs (`docs/solutions/`, ADRs, plans) and from marked tracker comments —
-    every node carries `prov:wasDerivedFrom` + `prov:wasGeneratedBy`, enforced by
-    SHACL.
+    docs (`docs/solutions/`, ADRs, plans), and implementation notes and planning
+    notes from marked tracker comments — every node carries `prov:wasDerivedFrom`
+    + `prov:wasGeneratedBy`, enforced by SHACL.
 - **Hybrid search**: lexical + vector (fastembed, no PyTorch) fused with
   reciprocal rank fusion — robust to exact IDs *and* paraphrases.
 - **A read-only MCP server** exposing `kg_hybrid_search` (preferred),

@@ -45,11 +45,11 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     # Keep all variables at outer scope: a FILTER inside a UNION branch only sees
     # variables bound *within* that branch (SPARQL spec; Stardog enforces it,
     # rdflib does not). So we OPTIONAL the topic then decide the match with BIND.
-    # Learnings AND Decisions (ADRs, plans, decision comments) are both surfaced —
-    # they are all planning knowledge.
+    # Learnings, Decisions (ADRs, plans, decision comments), ImplementationNotes
+    # (bot summaries), and PlanningNotes (tracker planning output) are all surfaced.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?type {{ kg:Learning kg:Decision }}
+      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
       ?learning a ?type ; dcterms:title ?title .
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}

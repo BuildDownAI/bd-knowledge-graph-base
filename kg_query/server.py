@@ -34,12 +34,13 @@ def store() -> Store:
 
 @mcp.tool()
 def kg_search(term: str, limit: int = 10) -> dict:
-    """Surface prior LEARNINGS and DECISIONS relevant to a term — the first thing
-    to call when starting work in an unfamiliar area or before writing code that
-    touches a known-tricky surface of the source project. Matches the
-    term against topics/tags and titles across solutions docs, ADRs, plans, and
-    Linear-issue learnings. Returns each item's title, category, priority, a fix
-    snippet, and which topics matched. Read-only.
+    """Surface prior LEARNINGS, DECISIONS, IMPLEMENTATION NOTES, and PLANNING NOTES
+    relevant to a term — the first thing to call when starting work in an unfamiliar
+    area or before writing code that touches a known-tricky surface of the source
+    project. Matches the term against topics/tags and titles across solutions docs,
+    ADRs, plans, Linear-issue learnings, bot implementation summaries, and planning
+    output. Returns each item's title, category, priority, a fix snippet, and which
+    topics matched. Read-only.
     """
     return queries.kg_search(store(), term, limit)
 
