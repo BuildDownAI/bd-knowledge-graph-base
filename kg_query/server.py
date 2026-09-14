@@ -108,11 +108,15 @@ def main() -> None:
     if os.environ.get("KG_HTTP"):
         mcp.settings.host = os.environ.get("KG_HTTP_HOST", "127.0.0.1")
         mcp.settings.port = int(os.environ.get("KG_HTTP_PORT", "8765"))
-        # KGB-28: stateless_http=True makes FastMCP create a fresh transport per
-        # request (no mcp-session-id required).  json_response=True returns plain
-        # JSON instead of SSE, matching what the orchestrator expects.  Both
-        # attributes exist in the pinned range (mcp>=1.2,<1.30) and the Settings
-        # model uses extra='ignore', so setting them is safe across patch versions.
+        # KGB-28: run streamable-HTTP stateless. FastMCP's HTTP transport is
+        # stateful by default on every release tested (1.29.1 and 1.30.0): a
+        # POST without an mcp-session-id from a prior initialize is answered
+        # "400 Missing session ID". The orchestrator proxies each call as one
+        # session-less POST, so the server must never demand a session.
+        # json_response=True returns plain JSON instead of an SSE frame and
+        # drops the "must accept text/event-stream" 406. Both settings exist
+        # from mcp 1.8 (checked against 1.8.0, 1.29.1, 1.30.0), hence the pin's
+        # lower bound; the upper bound is the last version this was tested on.
         mcp.settings.stateless_http = True
         mcp.settings.json_response = True
         mcp.run(transport="streamable-http")
