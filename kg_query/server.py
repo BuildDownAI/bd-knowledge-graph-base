@@ -108,10 +108,10 @@ def main() -> None:
     if os.environ.get("KG_HTTP"):
         mcp.settings.host = os.environ.get("KG_HTTP_HOST", "127.0.0.1")
         mcp.settings.port = int(os.environ.get("KG_HTTP_PORT", "8765"))
-        # KGB-28: stateless so each POST is self-contained — no session ID required.
-        # The orchestrator proxies tools/list and tools/call as one-shot POSTs.
-        mcp.settings.stateless_http = True
-        mcp.settings.json_response = True
+        # KGB-28: mcp<1.30 (pinned in requirements.txt / pyproject.toml) uses
+        # stateless streamable-HTTP by default — no session ID needed.  The
+        # stateless_http / json_response attributes were only added in 1.30 when
+        # the default flipped, so do not set them here.
         mcp.run(transport="streamable-http")
     else:
         mcp.run()  # stdio transport (default)

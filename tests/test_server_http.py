@@ -116,11 +116,15 @@ def main() -> None:
             [sys.executable, "-m", "kg_query.server"],
             env=env,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         try:
             if not _wait_for_port(port):
+                stderr_out = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
                 print("FAIL: server did not bind port in time")
+                if stderr_out:
+                    print("--- server stderr ---")
+                    print(stderr_out)
                 sys.exit(1)
 
             namespace = env.get("KG_SERVER_NAME", "kg")
