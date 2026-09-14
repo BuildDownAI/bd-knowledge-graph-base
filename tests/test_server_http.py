@@ -82,7 +82,7 @@ def _post_jsonrpc(port: int, method: str, params: dict | None = None) -> tuple[i
         data=payload,
         headers={
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "application/json, text/event-stream",
         },
         method="POST",
     )
@@ -120,6 +120,12 @@ def main() -> None:
         )
         try:
             if not _wait_for_port(port):
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
                 stderr_out = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
                 print("FAIL: server did not bind port in time")
                 if stderr_out:
