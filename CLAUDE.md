@@ -25,6 +25,12 @@ issue for the base change), **decline** (merge + justification in the PR comment
 issue), **defer** (merge + Backlog issue). Declined notes still merge: the diagnosis is the
 valuable part. Full rules: `CONTRIBUTING.md` → *Evaluating a learning*.
 
+## The refresh rail
+
+Every change to a KG repo is proven by a rail dry-run before it merges, and a snapshot reaches
+the serving graph only through the orchestrator's rail. Flow, contracts this repo must keep,
+one-time setup and the sidecar liveness probe: `docs/design/refresh-rail.md`.
+
 ## Hard rules
 
 - This repo will be public: **no** ticket contents, internal names beyond a project slug,
