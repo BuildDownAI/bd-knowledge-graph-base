@@ -90,6 +90,7 @@ setup.sh               # one-shot: venv (uv or pip) + deps + build
 | [semantic-search.md](docs/design/semantic-search.md) | Semantic search design |
 | [hybrid-search.md](docs/design/hybrid-search.md) | Hybrid search (lexical + vector, RRF) |
 | [snapshot-guard.md](docs/design/snapshot-guard.md) | Snapshot guard rule (`kg-ingest guard`) |
+| [refresh-rail.md](docs/design/refresh-rail.md) | The refresh rail from the KG repo's side: flow, dry-run and PR check, contracts, one-time setup, sidecar liveness |
 
 ## Keeping a downstream KG current
 
