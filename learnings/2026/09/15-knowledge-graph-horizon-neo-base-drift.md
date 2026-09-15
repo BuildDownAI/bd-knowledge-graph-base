@@ -43,3 +43,17 @@ PR. A refresh that ran blind on a stale derivative had no cheaper path to that r
    a warning that names the open `kg-upstream/` PR, so the operator sees the remedy next to the
    symptom. Combined with the contract check suggested in the refresh-contract note, a stale
    derivative fails loudly before ingest rather than silently after it.
+
+## Companion change outside the template
+
+The measurement that reads "unknown" lives in the refresh rail, not in the template: the
+orchestrator's preflight calls the platform's cross-repository compare for the advisory drift
+row and degrades to "unknown" on not-found. That call should be retired rather than patched.
+The runner already holds a clone of the derivative when the refresh runs; a fetch of the
+template's default branch into that clone and a count of commits between the two heads gives
+the true drift for every derivative that shares history with the template, which is every
+derivative the creation flow produces. The runner reports the count and the grouped changed
+paths through its existing progress callback, so the same number reaches the refresh PR, the
+status endpoint, and the preflight row. Filed here because the template's learnings inbox is
+where the ecosystem's improvements are triaged; the maintainers can route this half to the
+rail's tracker alongside the template half above.
