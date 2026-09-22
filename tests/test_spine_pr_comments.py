@@ -201,6 +201,73 @@ def test_clean_run_stats(repo: Path) -> None:
     print(f"PASS: clean run stats: pr_comments={stats['pr_comments']}, prs={stats['prs']}")
 
 
+def test_help_lists_no_docs_sites() -> None:
+    """--help output includes --no-docs-sites."""
+    import io
+    from kg_ingest import cli as cli_mod
+
+    buf = io.StringIO()
+    try:
+        with patch("sys.stdout", buf):
+            cli_mod.main(argv=["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0, f"--help exited with non-zero code: {exc.code}"
+
+    out = buf.getvalue()
+    assert "--no-docs-sites" in out, (
+        f"Expected '--no-docs-sites' in --help output, got:\n{out}"
+    )
+    print("PASS: --help lists --no-docs-sites")
+
+
+def test_no_docs_sites_skips_crawl(repo: Path) -> None:
+    """--no-docs-sites prints skip line and does not call _ingest_docs_sites."""
+    import io
+    from kg_ingest import cli as cli_mod
+    import kg_ingest.cli as _cli_mod
+    import kg_ingest.sources as _sources_mod
+    import kg_ingest.semantic as _semantic_mod
+    import kg_ingest.snapshot as _snapshot_mod
+    import kg_ingest.ontology as _ontology_mod
+    from rdflib import Graph
+    import pyshacl
+
+    sources_cfg = {
+        "code_repo": {"slug": "test-org/repo"},
+        "docs_sites": [{"url": "https://docs.example.com"}],
+    }
+
+    crawl_called = []
+
+    def fake_ingest_docs_sites(spine_g, cfg):
+        crawl_called.append(cfg)
+        return {}
+
+    buf = io.StringIO()
+    with patch.object(_sources_mod, "load", return_value=sources_cfg), \
+         patch.object(_spine_mod, "add_spine",
+                      return_value={"files": 1, "commits": 1, "people": 1,
+                                    "prs": 0, "pr_comments": 0}), \
+         patch.object(_cli_mod, "_ingest_docs_sites", side_effect=fake_ingest_docs_sites), \
+         patch.object(_semantic_mod, "add_semantic", return_value={}), \
+         patch.object(_ontology_mod, "load", return_value=Graph()), \
+         patch("pyshacl.validate", return_value=(True, None, "")), \
+         patch.object(_snapshot_mod, "write_snapshot",
+                      return_value={"part_files": 0}), \
+         patch("sys.stdout", buf):
+        cli_mod.main(argv=["--repo", str(repo), "--no-docs-sites", "--max-prs", "0",
+                           "--no-embed"])
+
+    assert len(crawl_called) == 0, (
+        f"_ingest_docs_sites should not have been called, got: {crawl_called}"
+    )
+    out = buf.getvalue()
+    assert "docs_sites: skipped (--no-docs-sites)" in out, (
+        f"Expected skip line in output, got:\n{out}"
+    )
+    print("PASS: --no-docs-sites skips crawl and prints skip line")
+
+
 def test_cli_exits_nonzero(repo: Path) -> None:
     """cli.main() returns 1 and prints KG_PR_COMMENTS_INCOMPLETE when PRCommentsIncomplete raised."""
     from kg_ingest import cli as cli_mod
@@ -234,6 +301,8 @@ def main() -> None:
         test_retry_and_incomplete(repo)
         test_clean_run_stats(repo)
         test_cli_exits_nonzero(repo)
+        test_help_lists_no_docs_sites()
+        test_no_docs_sites_skips_crawl(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 

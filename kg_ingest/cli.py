@@ -237,6 +237,8 @@ def main(argv=None) -> int:
     ap.add_argument("--no-embed", dest="embed", action="store_false",
                     help="skip rebuilding the embedding sidecar "
                          "(e.g. fastembed not installed / offline)")
+    ap.add_argument("--no-docs-sites", dest="docs_sites", action="store_false", default=True,
+                    help="skip the docs_sites crawl (e.g. offline / CI unit tests)")
     ap.add_argument("--pipeline-ver", default="0.1.0")
     args = ap.parse_args(argv)
     from . import sources as _sources
@@ -268,7 +270,10 @@ def main(argv=None) -> int:
 
     # ---- docs_sites: crawl published documentation into the spine graph ----
     _docs_sites = _src_cfg.get("docs_sites") or []
-    if _docs_sites:
+    if not args.docs_sites:
+        if _docs_sites:
+            print("docs_sites: skipped (--no-docs-sites)")
+    elif _docs_sites:
         print("== docs_sites ingest ==")
         ds_stats = _ingest_docs_sites(spine_g, _docs_sites)
         for k, v in ds_stats.items():
