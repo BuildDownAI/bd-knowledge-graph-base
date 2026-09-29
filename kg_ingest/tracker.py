@@ -60,23 +60,38 @@ _LIFECYCLE_LABELS = {
     "plan-complete", "ready for review",
 }
 
+# The issue selection, once. The live query is built from it, and the
+# tracker-data (file) path reports any record that lacks one of these fields,
+# so the pipeline's proxy and this ingest cannot drift apart silently (KGA-8).
+ISSUE_FIELDS: tuple[str, ...] = (
+    "identifier",
+    "title",
+    "description",
+    "branchName",
+    "state { name type }",
+    "labels { nodes { name } }",
+    "project { name }",
+    "parent { identifier }",
+    "comments(first: 50) { nodes { body user { name } } }",
+    "relations { nodes { type relatedIssue { identifier } } }",
+)
+
+# Top-level key of each selection, e.g. "comments" for "comments(first: 50) { ... }".
+ISSUE_FIELD_NAMES: tuple[str, ...] = tuple(
+    f.split("(")[0].split(" ")[0] for f in ISSUE_FIELDS
+)
+
 _ISSUES_QUERY = """
 query($team: String!, $after: String) {
   issues(first: 100, after: $after,
          filter: { team: { key: { eq: $team } } }) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      identifier title description branchName
-      state { name type }
-      labels { nodes { name } }
-      project { name }
-      parent { identifier }
-      comments(first: 50) { nodes { body user { name } } }
-      relations { nodes { type relatedIssue { identifier } } }
+      %s
     }
   }
 }
-"""
+""" % "\n      ".join(ISSUE_FIELDS)
 
 
 def _bind(g: Graph) -> None:
@@ -319,7 +334,11 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
     label_tags = [l["name"].lower() for l in (iss.get("labels") or {}).get("nodes", [])
                   if l.get("name") and l["name"].lower() not in _LIFECYCLE_LABELS]
     _bot_users = bot_users or set()
-    for i, cm in enumerate(((iss.get("comments") or {}).get("nodes", []))):
+    # comments may be a plain list (pipeline shape) or {"nodes": [...]} (GraphQL shape)
+    _comments_raw = iss.get("comments") or []
+    _comments = (_comments_raw.get("nodes", []) if isinstance(_comments_raw, dict)
+                 else _comments_raw)
+    for i, cm in enumerate(_comments):
         body = (cm.get("body") or "").strip()
         author = (cm.get("user") or {}).get("name") or ""
         is_bot = _is_bot_user(author, _bot_users) if author else False
@@ -362,17 +381,26 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
 
 def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
                 pipeline_ver: str = "0.1.0", cfg: dict | None = None,
-                include_secondary: bool = True) -> dict:
-    """Ingest configured Linear teams into spine_g (issues) + run_g (learnings).
+                include_secondary: bool = True,
+                issues_override: list[dict] | None = None) -> dict:
+    """Ingest Linear issues into spine_g (issues) + run_g (learnings).
 
-    Reads which teams to pull from sources.yml. Primary teams always run;
+    When issues_override is given, the list is used directly and no LINEAR_API_KEY
+    is required (the live fetch is skipped). Team names are inferred from the
+    identifier prefix (e.g. "AII" from "AII-489").
+
+    Without an override, reads teams from sources.yml and fetches live via the
+    Linear GraphQL API (requires LINEAR_API_KEY). Primary teams always run;
     secondary teams run when include_secondary is True.
     """
-    api_key = os.environ.get("LINEAR_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "LINEAR_API_KEY not set — tracker ingest needs a Linear API key "
-            "(the graph would otherwise be silently empty). `source .env` first.")
+    if issues_override is None:
+        api_key = os.environ.get("LINEAR_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "LINEAR_API_KEY not set — tracker ingest needs a Linear API key "
+                "(the graph would otherwise be silently empty). `source .env` first.")
+    else:
+        api_key = None
     _bind(spine_g); _bind(run_g)
     run = _run_node(run_g, run_id, pipeline_ver)
     stats = {"teams": [], "issues": 0, "comment_learnings": 0,
@@ -383,16 +411,44 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
     extra_headings = tuple(cfg_data.get("comment_headings") or [])
     headings = (_BUILTIN_PLANNING_HEADING,) + extra_headings
     bot_users = set(cfg_data.get("bot_users") or [])
-    for entry in sources.trackers(cfg_data):
-        if entry.get("kind") != "linear":
-            continue
-        tier = entry.get("tier") or "primary"
-        if tier == "secondary" and not include_secondary:
-            continue
-        team = entry["team"]
-        issues = _fetch_team_issues(team, api_key)
-        for iss in issues:
-            _add_issue(spine_g, run_g, run, team, iss, stats,
-                       headings=headings, bot_users=bot_users)
-        stats["teams"].append(f"{team}({tier}):{len(issues)}")
+    team_issue_pairs: list[tuple[str, dict]] = []
+    team_labels: list[str] = []
+    if issues_override is not None:
+        teams: dict[str, list[dict]] = {}
+        for iss in issues_override:
+            ident = iss.get("identifier") or ""
+            team = ident.split("-")[0] if "-" in ident else "UNKNOWN"
+            teams.setdefault(team, []).append(iss)
+        for team, team_issues in teams.items():
+            for iss in team_issues:
+                team_issue_pairs.append((team, iss))
+            team_labels.append(f"{team}(override):{len(team_issues)}")
+        # Contract check: one line per field the file never carried, so a
+        # narrower proxy shows up in the run log instead of as fewer triples.
+        missing_counts: dict[str, int] = {}
+        for iss in issues_override:
+            for name in ISSUE_FIELD_NAMES:
+                if name not in iss:
+                    missing_counts[name] = missing_counts.get(name, 0) + 1
+        for name in ISSUE_FIELD_NAMES:
+            if name in missing_counts:
+                print(f"tracker: field '{name}' missing from "
+                      f"{missing_counts[name]}/{len(issues_override)} tracker-data records")
+        stats["missing_fields"] = sorted(missing_counts)
+    else:
+        for entry in sources.trackers(cfg_data):
+            if entry.get("kind") != "linear":
+                continue
+            tier = entry.get("tier") or "primary"
+            if tier == "secondary" and not include_secondary:
+                continue
+            team = entry["team"]
+            issues = _fetch_team_issues(team, api_key)
+            for iss in issues:
+                team_issue_pairs.append((team, iss))
+            team_labels.append(f"{team}({tier}):{len(issues)}")
+    for team, iss in team_issue_pairs:
+        _add_issue(spine_g, run_g, run, team, iss, stats,
+                   headings=headings, bot_users=bot_users)
+    stats["teams"].extend(team_labels)
     return stats

@@ -3,6 +3,7 @@
 Subcommands wrap the existing modules, which all stay runnable directly via
 `python -m kg_ingest.<module>`:
 
+  kg-ingest refresh [flags]  one-command ingest from sources.yml (kg_ingest.cli)
   kg-ingest build [flags]    full ingest -> out/graph.trig + snapshot/ (kg_ingest.cli)
   kg-ingest embed            rebuild only the embeddings sidecar (kg_ingest.embed)
   kg-ingest snapshot         regenerate snapshot/ from out/graph.trig (kg_ingest.snapshot)
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import sys
 
-_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize", "guard")
+_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize", "refresh", "guard")
 
 
 def main(argv=None) -> int:
@@ -29,9 +30,10 @@ def main(argv=None) -> int:
     if cmd in ("embed", "snapshot") and rest:
         print(f"kg-ingest {cmd} takes no arguments (see `kg-ingest -h`)")
         return 0 if rest[0] in ("-h", "--help") else 2
-    if cmd == "build":
+    if cmd in ("build", "refresh"):
         from . import cli
-        return cli.main(rest) or 0
+        fn = cli.refresh if cmd == "refresh" else cli.main
+        return fn(rest) or 0
     if cmd == "embed":
         from . import embed
         embed.main()
