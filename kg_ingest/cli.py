@@ -7,6 +7,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
@@ -33,8 +35,18 @@ def _heading_anchor(heading: str) -> str:
     return re.sub(r"-+", "-", s).strip("-")
 
 
-def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
-    """Crawl docs_sites entries and emit DocSite/DocPage/DocSection triples into spine_g."""
+def _ingest_docs_sites(
+    spine_g: Graph,
+    docs_sites_cfg: list,
+    prior_g: Graph | None = None,
+) -> dict:
+    """Crawl docs_sites entries and emit DocSite/DocPage/DocSection triples into spine_g.
+
+    prior_g: prior spine graph used for incremental refresh.  Pages whose
+    content_hash is unchanged have their DocSection triples copied from prior_g
+    instead of being re-extracted (skip re-chunking).  Reports pages fetched and
+    changed count per site.
+    """
     from .docsite import crawl_site, CrawlConfig
 
     KG = iris.KG
@@ -45,6 +57,18 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
         root_url = (entry.get("url") or "").rstrip("/")
         if not root_url:
             continue
+
+        site_iri = iris.doc_site(root_url)
+
+        # Build prior hash map {page_url: content_hash} for incremental refresh
+        prior_hashes: dict[str, str] | None = None
+        if prior_g is not None:
+            prior_hashes = {}
+            for page_iri_p, _, hash_lit in prior_g.triples((None, KG.contentHash, None)):
+                if (page_iri_p, KG.partOf, site_iri) in prior_g:
+                    url_lit = prior_g.value(page_iri_p, KG.url)
+                    if url_lit:
+                        prior_hashes[str(url_lit)] = str(hash_lit)
 
         config = CrawlConfig(
             root_url=root_url,
@@ -57,13 +81,15 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
         )
 
         print(f"== docsite crawl: {root_url} ==")
-        pages = crawl_site(config)
+        pages = crawl_site(config, prior_hashes=prior_hashes)
+        changed_count = sum(
+            1 for p in pages
+            if prior_hashes is None or prior_hashes.get(p.url) != p.content_hash
+        )
 
-        site_iri = iris.doc_site(root_url)
         spine_g.add((site_iri, RDF.type, KG.DocSite))
         spine_g.add((site_iri, KG.rootUrl, Literal(root_url)))
         spine_g.add((site_iri, DCTERMS.title, Literal(root_url)))
-
         documents_branch = entry.get("documents_branch")
         if documents_branch:
             spine_g.add((site_iri, KG.documentsBranch, Literal(str(documents_branch))))
@@ -75,6 +101,11 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
 
         fetched_ats: list[str] = []
         for page in pages:
+            is_unchanged = (
+                prior_hashes is not None
+                and prior_hashes.get(page.url) == page.content_hash
+            )
+
             # Anchor slugs must be unique per page: repeated headings ("Required",
             # "Required") would otherwise collide onto ONE DocSection IRI, merging
             # two sections' triples and double-emitting cards. Site generators
@@ -83,41 +114,55 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
             page_iri = iris.doc_page(page.url)
             spine_g.add((page_iri, RDF.type, KG.DocPage))
             spine_g.add((page_iri, KG.url, Literal(page.url)))
-            spine_g.add((page_iri, DCTERMS.title, Literal(page.title)))
             spine_g.add((page_iri, KG.contentHash, Literal(page.content_hash)))
             spine_g.add((page_iri, DCTERMS.modified,
                          Literal(page.fetched_at, datatype=XSD.dateTime)))
             spine_g.add((page_iri, KG.partOf, site_iri))
             fetched_ats.append(page.fetched_at)
 
-            preamble_parts: list[str] = []
-            for section in page.sections:
-                if section.level == 0:
-                    if section.text:
-                        preamble_parts.append(section.text)
-                    continue
+            if is_unchanged and prior_g is not None:
+                # Unchanged page: restore title and sections from prior graph
+                prior_title = prior_g.value(page_iri, DCTERMS.title)
+                spine_g.add((page_iri, DCTERMS.title, prior_title or Literal(page.url)))
+                prior_detail = prior_g.value(page_iri, KG.detail)
+                if prior_detail:
+                    spine_g.add((page_iri, KG.detail, prior_detail))
+                # Copy DocSection triples (skip re-chunking)
+                for sec_iri, _, _ in prior_g.triples((None, KG.partOf, page_iri)):
+                    for triple in prior_g.triples((sec_iri, None, None)):
+                        spine_g.add(triple)
+                    total_sections += 1
+            else:
+                # New or changed page: extract and emit sections
+                spine_g.add((page_iri, DCTERMS.title, Literal(page.title)))
+                preamble_parts: list[str] = []
+                for section in page.sections:
+                    if section.level == 0:
+                        if section.text:
+                            preamble_parts.append(section.text)
+                        continue
 
-                anchor = _heading_anchor(section.heading)
-                if anchor:
-                    n = _seen_anchors.get(anchor, 0) + 1
-                    _seen_anchors[anchor] = n
-                    if n > 1:
-                        anchor = f"{anchor}-{n}"
-                sec_iri = iris.doc_section(page.url, anchor)
-                if sec_iri is None:
-                    continue
+                    anchor = _heading_anchor(section.heading)
+                    if anchor:
+                        n = _seen_anchors.get(anchor, 0) + 1
+                        _seen_anchors[anchor] = n
+                        if n > 1:
+                            anchor = f"{anchor}-{n}"
+                    sec_iri = iris.doc_section(page.url, anchor)
+                    if sec_iri is None:
+                        continue
 
-                spine_g.add((sec_iri, RDF.type, KG.DocSection))
-                spine_g.add((sec_iri, KG.heading, Literal(section.heading)))
-                spine_g.add((sec_iri, KG.level,
-                             Literal(section.level, datatype=XSD.integer)))
-                spine_g.add((sec_iri, KG.anchor, Literal(anchor)))
-                spine_g.add((sec_iri, KG.text, Literal(section.text)))
-                spine_g.add((sec_iri, KG.partOf, page_iri))
-                total_sections += 1
+                    spine_g.add((sec_iri, RDF.type, KG.DocSection))
+                    spine_g.add((sec_iri, KG.heading, Literal(section.heading)))
+                    spine_g.add((sec_iri, KG.level,
+                                 Literal(section.level, datatype=XSD.integer)))
+                    spine_g.add((sec_iri, KG.anchor, Literal(anchor)))
+                    spine_g.add((sec_iri, KG.text, Literal(section.text)))
+                    spine_g.add((sec_iri, KG.partOf, page_iri))
+                    total_sections += 1
 
-            if preamble_parts:
-                spine_g.add((page_iri, KG.detail, Literal(" ".join(preamble_parts))))
+                if preamble_parts:
+                    spine_g.add((page_iri, KG.detail, Literal(" ".join(preamble_parts))))
 
             total_pages += 1
 
@@ -125,7 +170,7 @@ def _ingest_docs_sites(spine_g: Graph, docs_sites_cfg: list) -> dict:
                         else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
         spine_g.add((site_iri, DCTERMS.modified,
                      Literal(site_fetched, datatype=XSD.dateTime)))
-        print(f"   pages: {total_pages}, sections: {total_sections}")
+        print(f"   pages: {total_pages} fetched, {changed_count} changed")
 
     return {"docsite_pages": total_pages, "docsite_sections": total_sections}
 
@@ -213,6 +258,19 @@ def _ingest_mcp_sources(spine_g: Graph, mcp_sources_cfg: list) -> dict:
     return {"mcp_pages": total_pages, "mcp_sections": total_sections}
 
 
+def secondary_repo_path(entry: dict, repos_root: str | None) -> Path:
+    """Where a sources.yml secondary_repos entry is cloned.
+
+    With --repos-root, the clone lives at <root>/<basename(slug)> — the layout the
+    AI-Implement kg-refresh pipeline produces. Without it, the entry's own path,
+    relative to the KG repo root (this repo).
+    """
+    if repos_root:
+        return (Path(repos_root) / Path(entry["slug"]).name).resolve()
+    p = Path(entry["path"])
+    return p if p.is_absolute() else (OUT_DIR.parent / p).resolve()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True, help="path to the source repo to ingest")
@@ -225,6 +283,14 @@ def main(argv=None) -> int:
     ap.add_argument("--tracker", action="store_true",
                     help="also ingest tracker (Linear) issues from sources.yml "
                          "(requires LINEAR_API_KEY in the environment)")
+    ap.add_argument("--tracker-data", default=None, metavar="PATH",
+                    help="path to a pipeline-fetched tracker-data.json (JSON array of "
+                         "issues); implies --tracker, no LINEAR_API_KEY needed; "
+                         "if LINEAR_API_KEY is also set the file wins")
+    ap.add_argument("--repos-root", default=None, metavar="DIR",
+                    help="directory holding clones of sources.yml secondary_repos as "
+                         "<DIR>/<basename(slug)> (the AI-Implement kg-refresh layout); "
+                         "implies --secondary and replaces each entry's relative path")
     ap.add_argument("--secondary", action="store_true",
                     help="also ingest secondary_repos from sources.yml (e.g. skills) "
                          "into the same graph")
@@ -269,13 +335,23 @@ def main(argv=None) -> int:
         return 1
 
     # ---- docs_sites: crawl published documentation into the spine graph ----
+    # Load prior spine graph for incremental refresh (skip re-chunking unchanged pages)
+    _prior_spine_g: Graph | None = None
+    _prior_trig = OUT_DIR / "graph.trig"
+    if _prior_trig.exists():
+        try:
+            _prior_ds = Dataset()
+            _prior_ds.parse(str(_prior_trig), format="trig")
+            _prior_spine_g = _prior_ds.graph(iris.G_SPINE)
+        except Exception:
+            pass
+
     _docs_sites = _src_cfg.get("docs_sites") or []
     if not args.docs_sites:
-        if _docs_sites:
-            print("docs_sites: skipped (--no-docs-sites)")
+        print("docs_sites: skipped (--no-docs-sites)")
     elif _docs_sites:
         print("== docs_sites ingest ==")
-        ds_stats = _ingest_docs_sites(spine_g, _docs_sites)
+        ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
         for k, v in ds_stats.items():
             print(f"   {k}: {v}")
 
@@ -301,24 +377,30 @@ def main(argv=None) -> int:
         print(f"   {k}: {v}")
 
     # ---- tracker ingest (opt-in; Linear issues + comment learnings) ----
-    if args.tracker:
+    if args.tracker or args.tracker_data:
         from . import tracker
         tr_run_id = f"tracker-{run_id}"
         tr_run_g = ds.graph(iris.run_graph(tr_run_id))
         print(f"== tracker ingest (run {tr_run_id}) ==")
+        issues_override = None
+        if args.tracker_data:
+            with open(args.tracker_data, encoding="utf-8") as _f:
+                issues_override = json.load(_f)
+            if os.environ.get("LINEAR_API_KEY"):
+                print("tracker: LINEAR_API_KEY set but --tracker-data given — file wins")
         tr_stats = tracker.add_tracker(spine_g, tr_run_g, args.repo_slug, tr_run_id,
-                                       pipeline_ver=args.pipeline_ver)
+                                       pipeline_ver=args.pipeline_ver,
+                                       issues_override=issues_override)
         for k, v in tr_stats.items():
             print(f"   {k}: {v}")
 
     # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
-    if args.secondary:
+    if args.secondary or args.repos_root:
         for entry in (_src_cfg.get("secondary_repos") or []):
-            # paths in sources.yml are relative to the KG repo root (this repo)
-            p = Path(entry["path"])
-            sec_path = p if p.is_absolute() else (OUT_DIR.parent / p).resolve()
+            sec_path = secondary_repo_path(entry, args.repos_root)
             if not (sec_path / ".git").exists():
-                print(f"== secondary repo SKIPPED (not a clone): {sec_path} ==")
+                where = "not under --repos-root" if args.repos_root else "not a clone"
+                print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
                 continue
             sec_slug = entry["slug"]
             print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
@@ -416,7 +498,8 @@ def main(argv=None) -> int:
         try:
             from . import embed as embed_mod
             from kg_query.store import RdflibStore
-            e = embed_mod.build_embeddings(RdflibStore(trig_path))
+            e = embed_mod.build_embeddings(RdflibStore(trig_path),
+                                              snapshot_dir=SNAP_DIR)
             if e.get("skipped"):
                 print(f"== embeddings skipped: {e['skipped']} ==")
             else:
@@ -431,6 +514,102 @@ def main(argv=None) -> int:
     print(f"== snapshot -> {SNAP_DIR.name}/digest.md + {snap['part_files']} parts ==")
 
     return 0 if conforms else 1
+
+
+def _refresh_stats(duration_sec: float) -> dict:
+    """Build stats dict from output files after a refresh run."""
+    parts: dict[str, int] = {}
+    parts_dir = SNAP_DIR / "parts"
+    if parts_dir.exists():
+        for p in sorted(parts_dir.glob("*.nt")):
+            try:
+                count = sum(
+                    1 for line in p.open(encoding="utf-8")
+                    if line.strip() and not line.startswith("#")
+                )
+            except Exception:
+                count = 0
+            parts[p.name] = count
+
+    vectors = 0
+    meta_path = OUT_DIR / "embeddings.meta.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                vectors = json.load(f).get("count", 0)
+        except Exception:
+            pass
+
+    return {
+        "quads": sum(parts.values()),
+        "vectors": vectors,
+        "docPages": parts.get("docpage.nt", 0),
+        "durationSec": duration_sec,
+        "parts": parts,
+    }
+
+
+def refresh(argv=None) -> int:
+    """One-command ingest: reads sources.yml, takes two inputs.
+
+    Usage: python -m kg_ingest refresh --code-repo <path> --tracker-data <file> [--no-embed]
+
+    Resolves --repo-slug from sources.yml automatically. --tracker-data implies
+    tracker ingest with no LINEAR_API_KEY required; if LINEAR_API_KEY is also set
+    the file wins. Prints one JSON stats line as the last stdout line.
+    """
+    import time
+    ap = argparse.ArgumentParser(
+        prog="kg-ingest refresh",
+        description=(
+            "Full ingest from sources.yml with two inputs: the code-repo path and "
+            "a pipeline-fetched tracker-data file. Resolves repo-slug, tracker config, "
+            "and doc globs from sources.yml automatically."
+        ),
+    )
+    ap.add_argument("--code-repo", required=True, metavar="PATH",
+                    help="path to the code repo to ingest (spine + semantic layer)")
+    ap.add_argument("--tracker-data", default=None, metavar="FILE",
+                    help="path to a pipeline-fetched tracker-data.json; "
+                         "no LINEAR_API_KEY needed when given")
+    ap.add_argument("--repos-root", default=None, metavar="DIR",
+                    help="directory holding clones of sources.yml secondary_repos as "
+                         "<DIR>/<basename(slug)>; entries absent there are skipped")
+    ap.add_argument("--no-embed", dest="embed", action="store_false", default=True,
+                    help="skip the embedding sidecar rebuild")
+    ap.add_argument("--no-docs-sites", dest="docs_sites", action="store_false", default=True,
+                    help="skip the docs_sites crawl (e.g. offline / CI unit tests)")
+    ap.add_argument("--pipeline-ver", default="0.1.0", help=argparse.SUPPRESS)
+    ap.add_argument("--max-prs", type=int, default=200, help=argparse.SUPPRESS)
+    ap.add_argument("--max-commits", type=int, default=0, help=argparse.SUPPRESS)
+    args = ap.parse_args(argv)
+
+    from . import sources as _src_mod
+    _src_cfg = _src_mod.load()
+    repo_slug = (_src_cfg.get("code_repo") or {}).get("slug") or "local/repo"
+
+    build_argv = [
+        "--repo", args.code_repo,
+        "--repo-slug", repo_slug,
+        "--pipeline-ver", args.pipeline_ver,
+        "--max-prs", str(args.max_prs),
+        "--max-commits", str(args.max_commits),
+    ]
+    if args.tracker_data:
+        build_argv += ["--tracker-data", args.tracker_data]
+    if args.repos_root:
+        build_argv += ["--repos-root", args.repos_root]
+    if not args.embed:
+        build_argv.append("--no-embed")
+    if not args.docs_sites:
+        build_argv.append("--no-docs-sites")
+
+    t0 = time.monotonic()
+    rc = main(build_argv)
+    duration = round(time.monotonic() - t0, 2)
+
+    print(json.dumps(_refresh_stats(duration)))
+    return rc
 
 
 def _demo_queries(g: Graph) -> None:
