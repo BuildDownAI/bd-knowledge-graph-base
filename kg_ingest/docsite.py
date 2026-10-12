@@ -270,6 +270,26 @@ def _extract_sections(main_el) -> list[Section]:
     return sections
 
 
+def _make_page(html_bytes: bytes, url: str, prior_hashes: "dict[str, str] | None") -> "Page":
+    """Return a fully extracted Page, or a sections-empty stub when hash is unchanged.
+
+    When prior_hashes is provided and the page's SHA-256 matches, BeautifulSoup
+    extraction is skipped (sections=[]).  The caller detects unchanged pages by
+    comparing page.content_hash to prior_hashes[page.url] and reuses prior
+    section triples instead of re-chunking.
+    """
+    page_hash = hashlib.sha256(html_bytes).hexdigest()
+    if prior_hashes is not None and prior_hashes.get(url) == page_hash:
+        return Page(
+            url=url,
+            title="",
+            sections=[],
+            fetched_at=datetime.now(timezone.utc).isoformat(),
+            content_hash=page_hash,
+        )
+    return _extract_page(html_bytes, url)
+
+
 def _extract_page(html_bytes: bytes, url: str) -> Page:
     from bs4 import BeautifulSoup  # lazy
 
@@ -301,12 +321,21 @@ def _extract_page(html_bytes: bytes, url: str) -> Page:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def crawl_site(config: CrawlConfig) -> list[Page]:
+def crawl_site(
+    config: CrawlConfig,
+    *,
+    prior_hashes: "dict[str, str] | None" = None,
+) -> "list[Page]":
     """Crawl a documentation site and return one Page per fetched HTML page.
 
     Tries <origin>/sitemap.xml first; falls back to BFS link-walking.
     Respects robots.txt, max_depth, max_pages, and include/exclude path globs.
     No graph writes — callers (KGB-4) consume the returned Page objects.
+
+    prior_hashes: {url: content_hash} from a prior crawl.  Pages whose raw-HTML
+    SHA-256 matches are returned with sections=[] (no BeautifulSoup extraction);
+    callers detect unchanged pages via hash equality and reuse prior section
+    triples instead of re-chunking.  Pass None (the default) to always extract.
     """
     import requests as _requests  # lazy
     from collections import deque
@@ -354,7 +383,7 @@ def crawl_site(config: CrawlConfig) -> list[Page]:
                 continue
             if "html" not in resp.headers.get("content-type", ""):
                 continue
-            page = _extract_page(resp.content, url)
+            page = _make_page(resp.content, url, prior_hashes)
             pages.append(page)
             time.sleep(config.delay)
             if depth < config.max_depth:
