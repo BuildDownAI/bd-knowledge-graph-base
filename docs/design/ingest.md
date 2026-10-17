@@ -3,8 +3,8 @@
 **Status:** living reference · **Last updated:** 2026-07-28
 
 How `kg_ingest` turns source systems into the graph, why it rebuilds the way it
-does, which tracker relationships it captures, and what to add when the tracker
-is Jira instead of Linear. Read this before changing the ingest, and when
+does, which tracker relationships it captures, and how Jira records are ingested
+alongside Linear records. Read this before changing the ingest, and when
 standing up a KG for a **new** repo/tracker from scratch.
 
 Entry point: `python -m kg_ingest.cli --repo ../<repo> [--tracker] [--secondary]`.
@@ -124,29 +124,48 @@ it to `sources.yml` and its learnings are picked up with no code change.
 
 ---
 
-## 5. Adding Jira (and other trackers)
+## 5. Jira tracker-data ingestion
 
 The graph **vocabulary is already provider-neutral** — `kg:Issue`, `kg:partOf`,
 `kg:dependsOn`, `kg:duplicateOf`, `kg:relatedTo`, `kg:inProject`, `kg:Learning`,
-`kg:Decision` say nothing about Linear. Only `tracker.py`'s fetch+map is
-Linear-shaped (GraphQL + Linear's relation-type names). A Jira ingester is
-therefore a **new fetch layer onto the same targets**:
+`kg:Decision`, `kg:sourceSystem` say nothing about Linear. Jira records arrive in
+the same tracker-data file that Linear records use (`--tracker-data`); no Jira
+REST client is added to this repo.
 
-1. **Fetch** via Jira REST (`/rest/api/3/search` with JQL per configured
-   project), paginating like `_fetch_team_issues`.
-2. **Map relationships to the same predicates:**
-   - parent / Epic Link / sub-task → `kg:partOf`
-   - issue link `blocks` → `kg:dependsOn`; `duplicates` → `kg:duplicateOf`;
-     `relates to` → `kg:relatedTo`
-   - project → `kg:inProject`
-3. **Reuse `_classify` / `_comment_title` unchanged** on Jira comment bodies —
-   the learning markers are identical.
-4. **Declare it in `sources.yml`** as `- kind: jira` alongside the existing
-   `- kind: linear` entries; `add_tracker` already dispatches per `kind` (today it
-   `continue`s on non-`linear` — that branch becomes the Jira call).
+**How Jira records reach the graph:**
 
-Net: parent/child, dependencies, and learnings behave the same way on Jira as on
-Linear because they resolve to the same predicates and the same detector.
+AI-Implement (or any pipeline runner) exports each Jira issue in the Linear field
+shape and adds two extra fields:
+
+- `sourceSystem` — `"jira"` (or `"linear"` for Linear records)
+- `team` — the orchestrator mapping key (e.g. `"acme-app"`), used as
+  `kg:trackerTeam` and as the grouping key in the stats line
+
+`add_tracker` (file path) reads both fields and applies them directly:
+
+- `_add_issue` writes `kg:sourceSystem` from the record's `sourceSystem` field,
+  defaulting to `"linear"` when absent (backward-compatible with older exports).
+- The grouping loop uses `team` from the record when present, else falls back to
+  the identifier prefix (e.g. `"PROJ"` from `"PROJ-123"`). The stats label shows
+  `acme-app(override):3` instead of `PROJ(override):3`.
+
+**Relationship mapping (identical to Linear):**
+
+| Source (Jira) | Graph predicate | Meaning |
+|---|---|---|
+| parent / sub-task | `kg:partOf` | child → parent |
+| issue link `blocks` | `kg:dependsOn` | *other* depends on *this* (reverse) |
+| issue link `duplicates` | `kg:duplicateOf` | this → canonical |
+| issue link (other) | `kg:relatedTo` | soft link |
+| project | `kg:inProject` | issue → project |
+
+`_classify` and `_comment_title` are **reused unchanged** on Jira comment bodies
+— the build-up/down learning markers are tracker-agnostic.
+
+**Absent fields keep today's values.** A Linear export without `sourceSystem` or
+`team` gives byte-identical output. A graph that receives its first Jira records
+gains `issue.nt` / `comment.nt` lines; no part shrinks, so no snapshot baseline
+reset is needed.
 
 ---
 
@@ -213,8 +232,8 @@ The reusable recipe (this repo is the worked example):
    rebuilds safe.
 2. Edit **`sources.yml`**: point `code_repo` at the new repo, list its `doc_globs`,
    and declare the `trackers` (Linear teams and/or Jira projects) with `tier:`.
-3. If the tracker is Jira, add the fetch layer per §5; the target predicates and
-   the learnings detector carry over unchanged.
+3. If the tracker is Jira, supply records via `--tracker-data` per §5; the
+   target predicates and the learnings detector carry over unchanged.
 4. Run `--tracker --secondary`, confirm `SHACL validation → conforms: True`, and
    spot-check relationship counts (§3) and learnings-by-board (§4).
 5. Register the read-only MCP server (`.mcp.json.example` → `.mcp.json` via

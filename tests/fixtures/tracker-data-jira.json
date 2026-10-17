@@ -1,0 +1,41 @@
+[
+  {
+    "identifier": "PROJ-1",
+    "title": "Implement cache layer",
+    "description": "Add a configurable cache layer to the API gateway.",
+    "sourceSystem": "jira",
+    "team": "acme-app",
+    "state": {"name": "In Progress", "type": "started"},
+    "parent": {"identifier": "PROJ-3"},
+    "comments": [],
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  },
+  {
+    "identifier": "PROJ-2",
+    "title": "Add cache invalidation endpoint",
+    "description": "Add an endpoint to explicitly invalidate the cache for a resource.",
+    "sourceSystem": "jira",
+    "team": "acme-app",
+    "state": {"name": "To Do", "type": "unstarted"},
+    "comments": [],
+    "labels": {"nodes": []},
+    "relations": {"nodes": [{"type": "blocks", "relatedIssue": {"identifier": "PROJ-1"}}]}
+  },
+  {
+    "identifier": "PROJ-3",
+    "title": "Cache subsystem epic",
+    "description": "Epic covering the full cache subsystem implementation.",
+    "sourceSystem": "jira",
+    "team": "acme-app",
+    "state": {"name": "In Progress", "type": "started"},
+    "comments": [
+      {
+        "body": "# ai-implement-build-up-learnings\n\nThe cache TTL must be configurable per resource type. A single global TTL caused stale reads on the user-profile endpoint during the spike. The fix is a per-route TTL map in sources.yml.",
+        "user": {"name": "alice"}
+      }
+    ],
+    "labels": {"nodes": []},
+    "relations": {"nodes": []}
+  }
+]

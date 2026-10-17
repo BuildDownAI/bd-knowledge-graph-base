@@ -14,7 +14,7 @@ a `knowledge-graph-<your-project>` repo in minutes.
 - **Two-layer RDF graph** (rdflib + SHACL; Stardog optional):
   - **Spine** (deterministic, zero-LLM): repos, files, commits, PRs, people from
     git/GitHub, plus tracker issues/projects and their relation graph
-    (parent/blocks/related) from the Linear API.
+    (parent/blocks/related) from Linear or Jira (via the tracker-data file).
   - **Semantic** (parsed, always provenanced): learnings and decisions from your
     docs (`docs/solutions/`, ADRs, plans), and implementation notes and planning
     notes from marked tracker comments — every node carries `prov:wasDerivedFrom`
@@ -40,7 +40,7 @@ Requires **Python 3.10+**.
 # 2. Point it at your project: edit sources.yml
 #    - namespace:  https://kg.<your-org>.dev/   (set once, up front)
 #    - code_repo:  your project's slug + local path
-#    - trackers:   your Linear team(s)          (needs LINEAR_API_KEY)
+#    - trackers:   your Linear team(s) or Jira project(s) via --tracker-data
 ./setup.sh --tracker --secondary
 
 # 3. Search from a terminal:

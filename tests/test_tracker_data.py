@@ -260,6 +260,93 @@ check("repos-root absent: entry path relative to the KG repo",
 
 print("\nall tracker_data tests passed")
 
+# ----- KGB-33: tracker-neutral contract tests -----
+
+# --- Jira fixture: sourceSystem + team from record ---
+import json as _json
+
+JIRA_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "tracker-data-jira.json"
+with open(JIRA_FIXTURE_FILE, encoding="utf-8") as _jf:
+    jira_issues = _json.load(_jf)
+
+_jira_spine = Graph()
+_jira_run = Graph()
+_jira_out = io.StringIO()
+with contextlib.redirect_stdout(_jira_out):
+    _jira_stats = add_tracker(
+        _jira_spine, _jira_run, "test/repo", "test-run-jira",
+        pipeline_ver="0.1.0",
+        issues_override=jira_issues,
+    )
+
+proj1 = iris.tracker_issue("PROJ-1")
+proj2 = iris.tracker_issue("PROJ-2")
+proj3 = iris.tracker_issue("PROJ-3")
+
+check("jira PROJ-1 sourceSystem is 'jira'",
+      _jira_spine.value(proj1, KG.sourceSystem), Literal("jira"))
+
+check("jira PROJ-1 trackerTeam is 'acme-app'",
+      _jira_spine.value(proj1, KG.trackerTeam), Literal("acme-app"))
+
+check("jira PROJ-1 partOf PROJ-3",
+      (proj1, KG.partOf, proj3) in _jira_spine, True)
+
+check("jira PROJ-1 dependsOn PROJ-2",
+      (proj1, KG.dependsOn, proj2) in _jira_spine, True)
+
+jira_cnode = iris.comment("PROJ-3", 0)
+check("jira PROJ-3 comment 0 is kg:Learning",
+      (jira_cnode, RDF.type, KG.Learning) in _jira_run, True)
+
+check("jira Learning prov:wasDerivedFrom PROJ-3 issue",
+      (jira_cnode, PROV.wasDerivedFrom, proj3) in _jira_run, True)
+
+check("jira Learning prov:wasGeneratedBy a run node",
+      _jira_run.value(jira_cnode, PROV.wasGeneratedBy) is not None, True)
+
+check("jira stats: acme-app(override) in teams",
+      any("acme-app(override)" in t for t in _jira_stats["teams"]), True)
+
+# SHACL conformance for jira graph
+from pyshacl import validate as _shacl_validate
+from kg_ingest import ontology as _onto
+
+_shapes = _onto.load("shapes.ttl")
+_kg_onto = _onto.load("kg.ttl")
+_combined = _jira_spine + _jira_run + _kg_onto
+_conforms, _, _shacl_txt = _shacl_validate(
+    _combined, shacl_graph=_shapes, inference="rdfs", abort_on_first=False
+)
+check("jira fixture SHACL conforms", _conforms, True)
+
+# --- Linear fixture: same triples as before (no regression) ---
+_lin_spine_a = Graph()
+_lin_run_a = Graph()
+_lin_out_a = io.StringIO()
+with contextlib.redirect_stdout(_lin_out_a):
+    add_tracker(_lin_spine_a, _lin_run_a, "test/repo", "test-run-linear-a",
+                pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
+
+_lin_spine_b = Graph()
+_lin_run_b = Graph()
+_lin_out_b = io.StringIO()
+with contextlib.redirect_stdout(_lin_out_b):
+    add_tracker(_lin_spine_b, _lin_run_b, "test/repo", "test-run-linear-a",
+                pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
+
+check("linear fixture: two identical runs produce identical spine triples",
+      set(_lin_spine_a) == set(_lin_spine_b), True)
+
+check("linear fixture: AII-100 sourceSystem defaults to 'linear'",
+      _lin_spine_a.value(iss100, KG.sourceSystem), Literal("linear"))
+
+check("linear fixture: team still inferred from identifier prefix (no team field)",
+      any("AII(override)" in t for t in _jira_stats["teams"]) or
+      any("AII(override)" in t for t in stats["teams"]), True)
+
+print("\nall jira contract tests passed")
+
 # ----- refresh subcommand tests -----
 # `refresh` rewrites the committed snapshot/ in REPO_ROOT. Back it up and restore it
 # afterwards: an AI-Implement run that leaves snapshot/ modified is refused by the

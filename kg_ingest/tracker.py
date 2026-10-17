@@ -281,7 +281,7 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
     spine_g.add((node, RDF.type, KG.Issue))
     spine_g.add((node, KG.trackerKey, Literal(ident)))
     spine_g.add((node, KG.trackerTeam, Literal(team)))
-    spine_g.add((node, KG.sourceSystem, Literal("linear")))
+    spine_g.add((node, KG.sourceSystem, Literal(iss.get("sourceSystem") or "linear")))
     spine_g.add((node, DCTERMS.title, Literal((iss.get("title") or ident)[:400])))
     spine_g.add((node, RDFS.label, Literal(ident)))
     if iss.get("description"):
@@ -417,7 +417,7 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
         teams: dict[str, list[dict]] = {}
         for iss in issues_override:
             ident = iss.get("identifier") or ""
-            team = ident.split("-")[0] if "-" in ident else "UNKNOWN"
+            team = iss.get("team") or (ident.split("-")[0] if "-" in ident else "UNKNOWN")
             teams.setdefault(team, []).append(iss)
         for team, team_issues in teams.items():
             for iss in team_issues:
