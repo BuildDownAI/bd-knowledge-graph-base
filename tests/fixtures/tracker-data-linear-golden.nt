@@ -1,0 +1,197 @@
+<https://example.org/kg/resource/comment/TEST-1/0> <http://purl.org/dc/terms/title> "TEST-1 build-up learnings — Build-up learning: cache TTL should be configurable"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-1/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Learning> .
+<https://example.org/kg/resource/comment/TEST-1/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/alice> .
+<https://example.org/kg/resource/comment/TEST-1/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-1> .
+<https://example.org/kg/resource/comment/TEST-1/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-1/0> <https://example.org/kg/onto#detail> "# ai-implement-build-up-learnings\n\nFeature: cache TTL configuration\n\nThe build-up phase revealed that the cache TTL needs to be configurable per endpoint. We initially hard-coded 60 seconds but production traffic showed we need per-endpoint control. The fix is a YAML key `cache_ttl_seconds` per route." .
+<https://example.org/kg/resource/comment/TEST-1/0> <https://example.org/kg/onto#fix> "# ai-implement-build-up-learnings\n\nFeature: cache TTL configuration\n\nThe build-up phase revealed that the cache TTL needs to be configurable per endpoint. We initially hard-coded 60 seconds but production traffic showed we need per-endpoint control. The fix is a YAML key `cache_ttl_seconds` per route." .
+<https://example.org/kg/resource/comment/TEST-1/0> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/learning> .
+<https://example.org/kg/resource/comment/TEST-10/0> <http://purl.org/dc/terms/title> "TEST-10 implementation summary"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-10/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#ImplementationNote> .
+<https://example.org/kg/resource/comment/TEST-10/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/ai-implement-bot> .
+<https://example.org/kg/resource/comment/TEST-10/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-10> .
+<https://example.org/kg/resource/comment/TEST-10/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-10/0> <https://example.org/kg/onto#detail> "## Summary\n\nThis PR adds the golden snapshot-delta test to the base template. The test ingests the fixture repo and fixture tracker data, runs write_parts into a temp dir, and diffs the line counts against the checked-in golden table.\n\n## Approach\n\nUsed _make_fixture_repo from test_spine.py to create a deterministic git repo. Called _add_issue directly to avoid needing a LINEAR_API_KEY. The --write flag regenerates the golden file deterministically." .
+<https://example.org/kg/resource/comment/TEST-10/0> <https://example.org/kg/onto#fix> "## Summary\n\nThis PR adds the golden snapshot-delta test to the base template. The test ingests the fixture repo and fixture tracker data, runs write_parts into a temp dir, and diffs the line counts against the checked-in golden table.\n\n## Approach\n\nUsed _make_fixture_repo from test_spine.py to create a deterministic git repo. Called _add_issue directly to avoid needing a LINEAR_API_KEY. The --writ" .
+<https://example.org/kg/resource/comment/TEST-11/0> <http://purl.org/dc/terms/title> "TEST-11: 🔥 Smoke-Jumper Report"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-11/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Verification> .
+<https://example.org/kg/resource/comment/TEST-11/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/smoke-jumper-bot> .
+<https://example.org/kg/resource/comment/TEST-11/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-11> .
+<https://example.org/kg/resource/comment/TEST-11/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-11/0> <https://example.org/kg/onto#detail> "## 🔥 Smoke-Jumper Report\n\nVerification complete. The --write flag produces byte-identical output on two consecutive runs. The test exits 0 under the default namespace and under the custom namespace injected by test.yml via sed substitution in sources.yml." .
+<https://example.org/kg/resource/comment/TEST-11/0> <https://example.org/kg/onto#fix> "## 🔥 Smoke-Jumper Report\n\nVerification complete. The --write flag produces byte-identical output on two consecutive runs. The test exits 0 under the default namespace and under the custom namespace injected by test.yml via sed substitution in sources.yml." .
+<https://example.org/kg/resource/comment/TEST-12/0> <http://purl.org/dc/terms/title> "TEST-12: We decided to use a JSON file for the golden table with keys in the format `part.nt` rather than bare part names. This matches the filename convention in snapshot/parts/ and makes the table directly readable as a map from filename to line count. JSON is already parsed by the Python stdlib w"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-12/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Decision> .
+<https://example.org/kg/resource/comment/TEST-12/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/eve> .
+<https://example.org/kg/resource/comment/TEST-12/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-12> .
+<https://example.org/kg/resource/comment/TEST-12/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-12/0> <https://example.org/kg/onto#detail> "We decided to use a JSON file for the golden table with keys in the format `part.nt` rather than bare part names. This matches the filename convention in snapshot/parts/ and makes the table directly readable as a map from filename to line count. JSON is already parsed by the Python stdlib without any additional dependency, it round-trips cleanly through json.dumps with sort_keys=True and indent=2, and it is already familiar to contributors who read the tracker-data fixture. YAML would require PyYAML which is not in requirements.txt. CSV would complicate the key structure and require a custom parser. The JSON approach produces the simplest possible diff when the golden changes: each line is exactly one key-value pair, so a change to one snapshot part shows as exactly one changed line in the pull request diff." .
+<https://example.org/kg/resource/comment/TEST-12/0> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/architecture> .
+<https://example.org/kg/resource/comment/TEST-12/0> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/snapshot> .
+<https://example.org/kg/resource/comment/TEST-2/0> <http://purl.org/dc/terms/title> "TEST-2 build-down learnings — Build-down learning: pin API version before build-down"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-2/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Learning> .
+<https://example.org/kg/resource/comment/TEST-2/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/bob> .
+<https://example.org/kg/resource/comment/TEST-2/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-2> .
+<https://example.org/kg/resource/comment/TEST-2/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-2/0> <https://example.org/kg/onto#detail> "ai-implement-build-down-learnings\n\nThe implementation diverged from the plan at step 3 because the upstream API changed its response schema. Next time, pin the API version in the fixture before the build-down phase begins. This prevented a clean golden test run until we updated the snapshot." .
+<https://example.org/kg/resource/comment/TEST-2/0> <https://example.org/kg/onto#fix> "ai-implement-build-down-learnings\n\nThe implementation diverged from the plan at step 3 because the upstream API changed its response schema. Next time, pin the API version in the fixture before the build-down phase begins. This prevented a clean golden test run until we updated the snapshot." .
+<https://example.org/kg/resource/comment/TEST-3/0> <http://purl.org/dc/terms/title> "TEST-3: AI Planning: Sprint scope"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-3/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#PlanningNote> .
+<https://example.org/kg/resource/comment/TEST-3/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/ai-implement-bot> .
+<https://example.org/kg/resource/comment/TEST-3/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-3> .
+<https://example.org/kg/resource/comment/TEST-3/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-3/0> <https://example.org/kg/onto#detail> "AI Planning: Sprint scope\n\nWe will implement the snapshot-delta test in three steps. Step 1: create the fixture tracker-data file covering all classifier branches. Step 2: write the test script that ingests fixture and compares to golden. Step 3: run with --write and commit the golden. The risk is non-determinism in commit SHAs but line counts are stable. Mitigation: use a deterministic run ID so the run node IRI is stable across invocations." .
+<https://example.org/kg/resource/comment/TEST-3/0> <https://example.org/kg/onto#fix> "AI Planning: Sprint scope\n\nWe will implement the snapshot-delta test in three steps. Step 1: create the fixture tracker-data file covering all classifier branches. Step 2: write the test script that ingests fixture and compares to golden. Step 3: run with --write and commit the golden. The risk is non-determinism in commit SHAs but line counts are stable. Mitigation: use a deterministic run ID so " .
+<https://example.org/kg/resource/comment/TEST-4/0> <http://purl.org/dc/terms/title> "TEST-4 implementation summary"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-4/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#ImplementationNote> .
+<https://example.org/kg/resource/comment/TEST-4/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/ai-implement-bot> .
+<https://example.org/kg/resource/comment/TEST-4/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-4> .
+<https://example.org/kg/resource/comment/TEST-4/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-4/0> <https://example.org/kg/onto#detail> "## TEST-4 Implementation Summary\n\nAdded the snapshot-delta test with golden file regeneration via --write flag.\n\n## Test plan\n\n- Run with --write to generate golden\n- Run without flags to verify\n- Change a classifier constant and confirm the test fails with the delta table" .
+<https://example.org/kg/resource/comment/TEST-4/0> <https://example.org/kg/onto#fix> "## TEST-4 Implementation Summary\n\nAdded the snapshot-delta test with golden file regeneration via --write flag.\n\n## Test plan\n\n- Run with --write to generate golden\n- Run without flags to verify\n- Change a classifier constant and confirm the test fails with the delta table" .
+<https://example.org/kg/resource/comment/TEST-5/0> <http://purl.org/dc/terms/title> "TEST-5: 🔥 Smoke-Jumper Report"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-5/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Verification> .
+<https://example.org/kg/resource/comment/TEST-5/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/smoke-jumper-bot> .
+<https://example.org/kg/resource/comment/TEST-5/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-5> .
+<https://example.org/kg/resource/comment/TEST-5/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-5/0> <https://example.org/kg/onto#detail> "## 🔥 Smoke-Jumper Report\n\nAll smoke tests passed. The golden snapshot test exits 0 under both default and custom namespace. No regressions detected in the classifier paths." .
+<https://example.org/kg/resource/comment/TEST-5/0> <https://example.org/kg/onto#fix> "## 🔥 Smoke-Jumper Report\n\nAll smoke tests passed. The golden snapshot test exits 0 under both default and custom namespace. No regressions detected in the classifier paths." .
+<https://example.org/kg/resource/comment/TEST-6/0> <http://purl.org/dc/terms/title> "TEST-6: After reviewing the proposed approach, I recommend we keep the golden file checked into the repository rather than generating it at CI startup. The checked-in file gives reviewers a diff surface: when a classifier change lands, the PR must also include an updated snapshot-golden.json, making"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-6/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Decision> .
+<https://example.org/kg/resource/comment/TEST-6/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/carol> .
+<https://example.org/kg/resource/comment/TEST-6/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-6> .
+<https://example.org/kg/resource/comment/TEST-6/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-6/0> <https://example.org/kg/onto#detail> "After reviewing the proposed approach, I recommend we keep the golden file checked into the repository rather than generating it at CI startup. The checked-in file gives reviewers a diff surface: when a classifier change lands, the PR must also include an updated snapshot-golden.json, making the impact immediately visible. The alternative of generating at test time and comparing to a reference stored in environment variables hides the delta from PR reviewers. The checked-in approach also supports the offline workflow: a developer can run the test locally without network access and still get the correct verdict. One concern is that the golden must be regenerated deliberately via the --write flag rather than automatically on every test run. We address this by making the --write path the only sanctioned update mechanism and documenting it in the error message printed on failure." .
+<https://example.org/kg/resource/comment/TEST-6/0> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/architecture> .
+<https://example.org/kg/resource/comment/TEST-8/0> <http://purl.org/dc/terms/title> "TEST-8 learnings — Snapshot guard: kg-refresh learning"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-8/0> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Learning> .
+<https://example.org/kg/resource/comment/TEST-8/0> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/refresh-bot> .
+<https://example.org/kg/resource/comment/TEST-8/0> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-8> .
+<https://example.org/kg/resource/comment/TEST-8/0> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-8/0> <https://example.org/kg/onto#detail> "# ai-implement-kg-refresh-learnings\n\nThe kg-refresh run revealed that the snapshot guard rule fires correctly when comment.nt shrinks. The zero-shrink rule prevented a silent data loss when the tracker API returned an empty page due to a transient network error. The fix is to always check issue_count before applying the zero-shrink threshold." .
+<https://example.org/kg/resource/comment/TEST-8/0> <https://example.org/kg/onto#fix> "# ai-implement-kg-refresh-learnings\n\nThe kg-refresh run revealed that the snapshot guard rule fires correctly when comment.nt shrinks. The zero-shrink rule prevented a silent data loss when the tracker API returned an empty page due to a transient network error. The fix is to always check issue_count before applying the zero-shrink threshold." .
+<https://example.org/kg/resource/comment/TEST-8/0> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/snapshot> .
+<https://example.org/kg/resource/comment/TEST-8/1> <http://purl.org/dc/terms/title> "TEST-8: After reviewing the guard integration, the team agreed that the zero-shrink rule should apply only when the tracker returns at least one issue, not when the issue count is zero. This decision preserves backward compatibility for repos that do not configure a tracker team in sources.yml, wher"^^<http://www.w3.org/2001/XMLSchema#string> .
+<https://example.org/kg/resource/comment/TEST-8/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Decision> .
+<https://example.org/kg/resource/comment/TEST-8/1> <http://www.w3.org/ns/prov#wasAttributedTo> <https://example.org/kg/resource/person/dave> .
+<https://example.org/kg/resource/comment/TEST-8/1> <http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/kg/resource/issue/TEST-8> .
+<https://example.org/kg/resource/comment/TEST-8/1> <http://www.w3.org/ns/prov#wasGeneratedBy> <https://example.org/kg/resource/run/golden-run> .
+<https://example.org/kg/resource/comment/TEST-8/1> <https://example.org/kg/onto#detail> "<!-- orchestrator context: TEST-8 review -->\n\nAfter reviewing the guard integration, the team agreed that the zero-shrink rule should apply only when the tracker returns at least one issue, not when the issue count is zero. This decision preserves backward compatibility for repos that do not configure a tracker team in sources.yml, where every run would otherwise fail the zero-shrink check. The threshold-only rule still applies to code-derived parts such as commit.nt and file.nt, which can legitimately shrink when commits are pruned or files are deleted. This distinction between tracker-derived and code-derived parts is the key architectural decision here." .
+<https://example.org/kg/resource/comment/TEST-8/1> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/snapshot> .
+<https://example.org/kg/resource/issue/TEST-10> <http://purl.org/dc/terms/title> "Implementation note via Summary+Approach headings" .
+<https://example.org/kg/resource/issue/TEST-10> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-10> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-10" .
+<https://example.org/kg/resource/issue/TEST-10> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-10> <https://example.org/kg/onto#trackerKey> "TEST-10" .
+<https://example.org/kg/resource/issue/TEST-10> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-11> <http://purl.org/dc/terms/title> "Verification: --write produces byte-identical output" .
+<https://example.org/kg/resource/issue/TEST-11> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-11> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-11" .
+<https://example.org/kg/resource/issue/TEST-11> <https://example.org/kg/onto#partOf> <https://example.org/kg/resource/issue/TEST-6> .
+<https://example.org/kg/resource/issue/TEST-11> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-11> <https://example.org/kg/onto#trackerKey> "TEST-11" .
+<https://example.org/kg/resource/issue/TEST-11> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-12> <http://purl.org/dc/terms/title> "Decision: golden key format uses .nt extension" .
+<https://example.org/kg/resource/issue/TEST-12> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-12> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-12" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#label> "architecture" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#label> "snapshot" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#state> "Done" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#status> "done" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/architecture> .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/snapshot> .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#trackerKey> "TEST-12" .
+<https://example.org/kg/resource/issue/TEST-12> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-1> <http://purl.org/dc/terms/title> "Build-up learning: cache TTL should be configurable" .
+<https://example.org/kg/resource/issue/TEST-1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-1> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-1" .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#dependsOn> <https://example.org/kg/resource/issue/TEST-8> .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#label> "learning" .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/learning> .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#trackerKey> "TEST-1" .
+<https://example.org/kg/resource/issue/TEST-1> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-2> <http://purl.org/dc/terms/title> "Build-down learning: pin API version before build-down" .
+<https://example.org/kg/resource/issue/TEST-2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-2> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-2" .
+<https://example.org/kg/resource/issue/TEST-2> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-2> <https://example.org/kg/onto#trackerKey> "TEST-2" .
+<https://example.org/kg/resource/issue/TEST-2> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-3> <http://purl.org/dc/terms/title> "Snapshot-delta test planning" .
+<https://example.org/kg/resource/issue/TEST-3> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-3> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-3" .
+<https://example.org/kg/resource/issue/TEST-3> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-3> <https://example.org/kg/onto#trackerKey> "TEST-3" .
+<https://example.org/kg/resource/issue/TEST-3> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-4> <http://purl.org/dc/terms/title> "Implementation summary (via key heading)" .
+<https://example.org/kg/resource/issue/TEST-4> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-4> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-4" .
+<https://example.org/kg/resource/issue/TEST-4> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-4> <https://example.org/kg/onto#trackerKey> "TEST-4" .
+<https://example.org/kg/resource/issue/TEST-4> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-5> <http://purl.org/dc/terms/title> "Smoke report: golden test verified" .
+<https://example.org/kg/resource/issue/TEST-5> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-5> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-5" .
+<https://example.org/kg/resource/issue/TEST-5> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-5> <https://example.org/kg/onto#trackerKey> "TEST-5" .
+<https://example.org/kg/resource/issue/TEST-5> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-6> <http://purl.org/dc/terms/title> "Golden file format: JSON vs YAML vs CSV" .
+<https://example.org/kg/resource/issue/TEST-6> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-6> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-6" .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#inProject> <https://example.org/kg/resource/project/KG%20Base> .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#label> "architecture" .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/architecture> .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#trackerKey> "TEST-6" .
+<https://example.org/kg/resource/issue/TEST-6> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-7> <http://purl.org/dc/terms/title> "Bot failure note (suppressed — no special pattern)" .
+<https://example.org/kg/resource/issue/TEST-7> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-7> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-7" .
+<https://example.org/kg/resource/issue/TEST-7> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-7> <https://example.org/kg/onto#trackerKey> "TEST-7" .
+<https://example.org/kg/resource/issue/TEST-7> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-8> <http://purl.org/dc/terms/title> "Snapshot guard: kg-refresh learning" .
+<https://example.org/kg/resource/issue/TEST-8> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-8> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-8" .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#inProject> <https://example.org/kg/resource/project/KG%20Base> .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#label> "snapshot" .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#tagged> <https://example.org/kg/resource/topic/snapshot> .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#trackerKey> "TEST-8" .
+<https://example.org/kg/resource/issue/TEST-8> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/issue/TEST-9> <http://purl.org/dc/terms/title> "Short comments are suppressed" .
+<https://example.org/kg/resource/issue/TEST-9> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Issue> .
+<https://example.org/kg/resource/issue/TEST-9> <http://www.w3.org/2000/01/rdf-schema#label> "TEST-9" .
+<https://example.org/kg/resource/issue/TEST-9> <https://example.org/kg/onto#sourceSystem> "linear" .
+<https://example.org/kg/resource/issue/TEST-9> <https://example.org/kg/onto#trackerKey> "TEST-9" .
+<https://example.org/kg/resource/issue/TEST-9> <https://example.org/kg/onto#trackerTeam> "TEST" .
+<https://example.org/kg/resource/person/ai-implement-bot> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/ai-implement-bot> <https://example.org/kg/onto#login> "ai-implement-bot" .
+<https://example.org/kg/resource/person/alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/alice> <https://example.org/kg/onto#login> "alice" .
+<https://example.org/kg/resource/person/bob> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/bob> <https://example.org/kg/onto#login> "bob" .
+<https://example.org/kg/resource/person/carol> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/carol> <https://example.org/kg/onto#login> "carol" .
+<https://example.org/kg/resource/person/dave> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/dave> <https://example.org/kg/onto#login> "dave" .
+<https://example.org/kg/resource/person/eve> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/eve> <https://example.org/kg/onto#login> "eve" .
+<https://example.org/kg/resource/person/refresh-bot> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/refresh-bot> <https://example.org/kg/onto#login> "refresh-bot" .
+<https://example.org/kg/resource/person/smoke-jumper-bot> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Person> .
+<https://example.org/kg/resource/person/smoke-jumper-bot> <https://example.org/kg/onto#login> "smoke-jumper-bot" .
+<https://example.org/kg/resource/project/KG%20Base> <http://purl.org/dc/terms/title> "KG Base" .
+<https://example.org/kg/resource/project/KG%20Base> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Project> .
+<https://example.org/kg/resource/run/golden-run> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#ExtractionRun> .
+<https://example.org/kg/resource/run/golden-run> <https://example.org/kg/onto#model> "deterministic-tracker" .
+<https://example.org/kg/resource/run/golden-run> <https://example.org/kg/onto#notes> "Phase-1 deterministic Linear ingest (§2.7)" .
+<https://example.org/kg/resource/run/golden-run> <https://example.org/kg/onto#pipelineVer> "0.1.0" .
+<https://example.org/kg/resource/run/golden-run> <https://example.org/kg/onto#promptHash> "n/a-deterministic" .
+<https://example.org/kg/resource/topic/architecture> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Topic> .
+<https://example.org/kg/resource/topic/architecture> <http://www.w3.org/2004/02/skos/core#prefLabel> "architecture" .
+<https://example.org/kg/resource/topic/learning> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Topic> .
+<https://example.org/kg/resource/topic/learning> <http://www.w3.org/2004/02/skos/core#prefLabel> "learning" .
+<https://example.org/kg/resource/topic/snapshot> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#Topic> .
+<https://example.org/kg/resource/topic/snapshot> <http://www.w3.org/2004/02/skos/core#prefLabel> "snapshot" .

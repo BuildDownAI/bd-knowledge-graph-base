@@ -326,15 +326,46 @@ with contextlib.redirect_stdout(_lin_out_a):
     _lin_stats_a = add_tracker(_lin_spine_a, _lin_run_a, "test/repo", "test-run-linear-a",
                                pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
 
-_lin_spine_b = Graph()
-_lin_run_b = Graph()
-_lin_out_b = io.StringIO()
-with contextlib.redirect_stdout(_lin_out_b):
-    add_tracker(_lin_spine_b, _lin_run_b, "test/repo", "test-run-linear-a",
-                pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
+# This file changes only when a PR intentionally changes the Linear output —
+# the same contract as snapshot-golden.json for part counts.
+# To regenerate: PYTHONPATH=. python tests/test_tracker_data.py --write-golden
+_GOLDEN_LINEAR_FILE = REPO_ROOT / "tests" / "fixtures" / "tracker-data-linear-golden.nt"
+_GOLDEN_NS = "https://example.org/kg/"
 
-check("linear fixture: two identical runs produce identical spine triples",
-      set(_lin_spine_a) == set(_lin_spine_b), True)
+
+def _normalize_nt(g: Graph) -> list[str]:
+    """Sorted N-Triples for g, with IRIs normalized to the default namespace."""
+    from kg_ingest.iris import NAMESPACE as _NS
+    raw = g.serialize(format="nt")
+    lines = sorted(l for l in raw.splitlines() if l.strip())
+    if _NS != _GOLDEN_NS:
+        lines = [l.replace(_NS, _GOLDEN_NS) for l in lines]
+    return lines
+
+
+with open(REPO_ROOT / "tests" / "fixtures" / "tracker-data.json", encoding="utf-8") as _lf:
+    _lin_file_issues = json.load(_lf)
+_golden_spine = Graph()
+_golden_run = Graph()
+with contextlib.redirect_stdout(io.StringIO()):
+    add_tracker(_golden_spine, _golden_run, "test/repo", "golden-run",
+                pipeline_ver="0.1.0", issues_override=_lin_file_issues)
+_actual_nt = _normalize_nt(_golden_spine + _golden_run)
+
+if "--write-golden" in sys.argv:
+    _GOLDEN_LINEAR_FILE.write_text("\n".join(_actual_nt) + "\n", encoding="utf-8")
+    print(f"PASS: wrote {len(_actual_nt)} lines to {_GOLDEN_LINEAR_FILE.name}")
+else:
+    _golden_nt = [l for l in _GOLDEN_LINEAR_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    _added_nt = sorted(set(_actual_nt) - set(_golden_nt))
+    _removed_nt = sorted(set(_golden_nt) - set(_actual_nt))
+    if _added_nt or _removed_nt:
+        for _l in _removed_nt:
+            print(f"- {_l}")
+        for _l in _added_nt:
+            print(f"+ {_l}")
+    check("linear golden: sorted N-Triples match the pinned file",
+          _actual_nt == _golden_nt, True)
 
 check("linear fixture: AII-100 sourceSystem defaults to 'linear'",
       _lin_spine_a.value(iss100, KG.sourceSystem), Literal("linear"))
