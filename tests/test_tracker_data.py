@@ -263,11 +263,9 @@ print("\nall tracker_data tests passed")
 # ----- KGB-33: tracker-neutral contract tests -----
 
 # --- Jira fixture: sourceSystem + team from record ---
-import json as _json
-
 JIRA_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "tracker-data-jira.json"
 with open(JIRA_FIXTURE_FILE, encoding="utf-8") as _jf:
-    jira_issues = _json.load(_jf)
+    jira_issues = json.load(_jf)
 
 _jira_spine = Graph()
 _jira_run = Graph()
@@ -325,8 +323,8 @@ _lin_spine_a = Graph()
 _lin_run_a = Graph()
 _lin_out_a = io.StringIO()
 with contextlib.redirect_stdout(_lin_out_a):
-    add_tracker(_lin_spine_a, _lin_run_a, "test/repo", "test-run-linear-a",
-                pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
+    _lin_stats_a = add_tracker(_lin_spine_a, _lin_run_a, "test/repo", "test-run-linear-a",
+                               pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
 
 _lin_spine_b = Graph()
 _lin_run_b = Graph()
@@ -342,8 +340,7 @@ check("linear fixture: AII-100 sourceSystem defaults to 'linear'",
       _lin_spine_a.value(iss100, KG.sourceSystem), Literal("linear"))
 
 check("linear fixture: team still inferred from identifier prefix (no team field)",
-      any("AII(override)" in t for t in _jira_stats["teams"]) or
-      any("AII(override)" in t for t in stats["teams"]), True)
+      any("AII(override)" in t for t in _lin_stats_a["teams"]), True)
 
 print("\nall jira contract tests passed")
 
