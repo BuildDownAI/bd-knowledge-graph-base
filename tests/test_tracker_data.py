@@ -260,6 +260,121 @@ check("repos-root absent: entry path relative to the KG repo",
 
 print("\nall tracker_data tests passed")
 
+# ----- KGB-33: tracker-neutral contract tests -----
+
+# --- Jira fixture: sourceSystem + team from record ---
+JIRA_FIXTURE_FILE = REPO_ROOT / "tests" / "fixtures" / "tracker-data-jira.json"
+with open(JIRA_FIXTURE_FILE, encoding="utf-8") as _jf:
+    jira_issues = json.load(_jf)
+
+_jira_spine = Graph()
+_jira_run = Graph()
+_jira_out = io.StringIO()
+with contextlib.redirect_stdout(_jira_out):
+    _jira_stats = add_tracker(
+        _jira_spine, _jira_run, "test/repo", "test-run-jira",
+        pipeline_ver="0.1.0",
+        issues_override=jira_issues,
+    )
+
+proj1 = iris.tracker_issue("PROJ-1")
+proj2 = iris.tracker_issue("PROJ-2")
+proj3 = iris.tracker_issue("PROJ-3")
+
+check("jira PROJ-1 sourceSystem is 'jira'",
+      _jira_spine.value(proj1, KG.sourceSystem), Literal("jira"))
+
+check("jira PROJ-1 trackerTeam is 'acme-app'",
+      _jira_spine.value(proj1, KG.trackerTeam), Literal("acme-app"))
+
+check("jira PROJ-1 partOf PROJ-3",
+      (proj1, KG.partOf, proj3) in _jira_spine, True)
+
+check("jira PROJ-1 dependsOn PROJ-2",
+      (proj1, KG.dependsOn, proj2) in _jira_spine, True)
+
+jira_cnode = iris.comment("PROJ-3", 0)
+check("jira PROJ-3 comment 0 is kg:Learning",
+      (jira_cnode, RDF.type, KG.Learning) in _jira_run, True)
+
+check("jira Learning prov:wasDerivedFrom PROJ-3 issue",
+      (jira_cnode, PROV.wasDerivedFrom, proj3) in _jira_run, True)
+
+check("jira Learning prov:wasGeneratedBy a run node",
+      _jira_run.value(jira_cnode, PROV.wasGeneratedBy) is not None, True)
+
+check("jira stats: acme-app(override) in teams",
+      any("acme-app(override)" in t for t in _jira_stats["teams"]), True)
+
+# SHACL conformance for jira graph
+from pyshacl import validate as _shacl_validate
+from kg_ingest import ontology as _onto
+
+_shapes = _onto.load("shapes.ttl")
+_kg_onto = _onto.load("kg.ttl")
+_combined = _jira_spine + _jira_run + _kg_onto
+_conforms, _, _shacl_txt = _shacl_validate(
+    _combined, shacl_graph=_shapes, inference="rdfs", abort_on_first=False
+)
+check("jira fixture SHACL conforms", _conforms, True)
+
+# --- Linear fixture: same triples as before (no regression) ---
+_lin_spine_a = Graph()
+_lin_run_a = Graph()
+_lin_out_a = io.StringIO()
+with contextlib.redirect_stdout(_lin_out_a):
+    _lin_stats_a = add_tracker(_lin_spine_a, _lin_run_a, "test/repo", "test-run-linear-a",
+                               pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
+
+# This file changes only when a PR intentionally changes the Linear output —
+# the same contract as snapshot-golden.json for part counts.
+# To regenerate: PYTHONPATH=. python tests/test_tracker_data.py --write-golden
+_GOLDEN_LINEAR_FILE = REPO_ROOT / "tests" / "fixtures" / "tracker-data-linear-golden.nt"
+_GOLDEN_NS = "https://example.org/kg/"
+
+
+def _normalize_nt(g: Graph) -> list[str]:
+    """Sorted N-Triples for g, with IRIs normalized to the default namespace."""
+    from kg_ingest.iris import NAMESPACE as _NS
+    raw = g.serialize(format="nt")
+    lines = sorted(l for l in raw.splitlines() if l.strip())
+    if _NS != _GOLDEN_NS:
+        lines = [l.replace(_NS, _GOLDEN_NS) for l in lines]
+    return lines
+
+
+with open(REPO_ROOT / "tests" / "fixtures" / "tracker-data.json", encoding="utf-8") as _lf:
+    _lin_file_issues = json.load(_lf)
+_golden_spine = Graph()
+_golden_run = Graph()
+with contextlib.redirect_stdout(io.StringIO()):
+    add_tracker(_golden_spine, _golden_run, "test/repo", "golden-run",
+                pipeline_ver="0.1.0", issues_override=_lin_file_issues)
+_actual_nt = _normalize_nt(_golden_spine + _golden_run)
+
+if "--write-golden" in sys.argv:
+    _GOLDEN_LINEAR_FILE.write_text("\n".join(_actual_nt) + "\n", encoding="utf-8")
+    print(f"PASS: wrote {len(_actual_nt)} lines to {_GOLDEN_LINEAR_FILE.name}")
+else:
+    _golden_nt = [l for l in _GOLDEN_LINEAR_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    _added_nt = sorted(set(_actual_nt) - set(_golden_nt))
+    _removed_nt = sorted(set(_golden_nt) - set(_actual_nt))
+    if _added_nt or _removed_nt:
+        for _l in _removed_nt:
+            print(f"- {_l}")
+        for _l in _added_nt:
+            print(f"+ {_l}")
+    check("linear golden: sorted N-Triples match the pinned file",
+          _actual_nt == _golden_nt, True)
+
+check("linear fixture: AII-100 sourceSystem defaults to 'linear'",
+      _lin_spine_a.value(iss100, KG.sourceSystem), Literal("linear"))
+
+check("linear fixture: team still inferred from identifier prefix (no team field)",
+      any("AII(override)" in t for t in _lin_stats_a["teams"]), True)
+
+print("\nall jira contract tests passed")
+
 # ----- refresh subcommand tests -----
 # `refresh` rewrites the committed snapshot/ in REPO_ROOT. Back it up and restore it
 # afterwards: an AI-Implement run that leaves snapshot/ modified is refused by the
