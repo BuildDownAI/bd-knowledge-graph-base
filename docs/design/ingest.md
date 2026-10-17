@@ -239,3 +239,5 @@ The reusable recipe (this repo is the worked example):
 5. Register the read-only MCP server (`.mcp.json.example` → `.mcp.json` via
    `setup.sh`). Remember the graph loads **once at server start** — re-run ingest,
    then restart the MCP client to serve the new graph.
+6. `tests/test_sources_manifest.py` checks the repo's own `sources.yml`, so CI fails
+   on a malformed manifest before a refresh runs.
