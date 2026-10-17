@@ -41,12 +41,17 @@ code_repo:
 # bot_users:
 #   - "my-orchestrator-bot"
 
-# ---- Trackers to ingest (Linear; Jira planned). tier: primary is bound to ---
-# ---- code_repo; secondary teams ride along. Requires LINEAR_API_KEY. --------
+# ---- Trackers to ingest (Linear or Jira). tier: primary is bound to ---------
+# ---- code_repo; secondary teams ride along. Linear requires LINEAR_API_KEY. --
+# ---- Jira entries ingest only from a tracker-data file (--tracker-data); ----
+# ---- no Jira REST client is added to this repo. ----------------------------
 trackers: []
 #  - kind: linear
 #    team: PROJ
 #    tier: primary
+#  - kind: jira
+#    team: your-mapping-key   # orchestrator mapping key (used as kg:trackerTeam)
+#    tier: primary             # Jira arrives via --tracker-data, not a REST client
 
 # ---- SELF-INGESTION: fold this KG repo itself into the graph ----------------
 # When true, the graph also ingests THIS repo (git spine + docs), so the KG can

@@ -14,7 +14,7 @@ a `knowledge-graph-<your-project>` repo in minutes.
 - **Two-layer RDF graph** (rdflib + SHACL; Stardog optional):
   - **Spine** (deterministic, zero-LLM): repos, files, commits, PRs, people from
     git/GitHub, plus tracker issues/projects and their relation graph
-    (parent/blocks/related) from the Linear API.
+    (parent/blocks/related) from Linear or Jira (via the tracker-data file).
   - **Semantic** (parsed, always provenanced): learnings and decisions from your
     docs (`docs/solutions/`, ADRs, plans), and implementation notes and planning
     notes from marked tracker comments — every node carries `prov:wasDerivedFrom`
@@ -40,7 +40,7 @@ Requires **Python 3.10+**.
 # 2. Point it at your project: edit sources.yml
 #    - namespace:  https://kg.<your-org>.dev/   (set once, up front)
 #    - code_repo:  your project's slug + local path
-#    - trackers:   your Linear team(s)          (needs LINEAR_API_KEY)
+#    - trackers:   your Linear team(s) or Jira project(s) via --tracker-data
 ./setup.sh --tracker --secondary
 
 # 3. Search from a terminal:
@@ -90,6 +90,7 @@ setup.sh               # one-shot: venv (uv or pip) + deps + build
 | [semantic-search.md](docs/design/semantic-search.md) | Semantic search design |
 | [hybrid-search.md](docs/design/hybrid-search.md) | Hybrid search (lexical + vector, RRF) |
 | [snapshot-guard.md](docs/design/snapshot-guard.md) | Snapshot guard rule (`kg-ingest guard`) |
+| [refresh-rail.md](docs/design/refresh-rail.md) | The refresh rail from the KG repo's side: flow, dry-run and PR check, contracts, one-time setup, sidecar liveness |
 
 ## Keeping a downstream KG current
 

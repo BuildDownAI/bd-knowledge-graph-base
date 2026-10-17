@@ -1,0 +1,27 @@
+[
+  {
+    "id": "fixture-001",
+    "identifier": "AII-100",
+    "title": "Fix the widget",
+    "description": "Widget is broken and needs fixing.",
+    "state": {"name": "In Progress", "type": "started"},
+    "comments": [
+      {
+        "body": "# ai-implement-build-up-learnings\n\nWidgets need grease to work.",
+        "createdAt": "2026-09-01T10:00:00Z"
+      },
+      {
+        "body": "Short note.",
+        "createdAt": "2026-09-01T11:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "fixture-002",
+    "identifier": "AII-101",
+    "title": "Improve the gadget",
+    "description": "Gadget needs improvement",
+    "state": {"name": "Done", "type": "completed"},
+    "comments": []
+  }
+]
