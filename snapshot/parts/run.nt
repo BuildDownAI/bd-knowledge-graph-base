@@ -1,3 +1,8 @@
+<https://example.org/kg/resource/run/42bac9848a1e7356> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#ExtractionRun> .
+<https://example.org/kg/resource/run/42bac9848a1e7356> <https://example.org/kg/onto#model> "deterministic-parser" .
+<https://example.org/kg/resource/run/42bac9848a1e7356> <https://example.org/kg/onto#notes> "Phase-1 deterministic frontmatter/heading parse" .
+<https://example.org/kg/resource/run/42bac9848a1e7356> <https://example.org/kg/onto#pipelineVer> "0.1.0" .
+<https://example.org/kg/resource/run/42bac9848a1e7356> <https://example.org/kg/onto#promptHash> "n/a-deterministic" .
 <https://example.org/kg/resource/run/ae3627a00553184c> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/kg/onto#ExtractionRun> .
 <https://example.org/kg/resource/run/ae3627a00553184c> <https://example.org/kg/onto#model> "deterministic-parser" .
 <https://example.org/kg/resource/run/ae3627a00553184c> <https://example.org/kg/onto#notes> "Phase-1 deterministic frontmatter/heading parse" .
