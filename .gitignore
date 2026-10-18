@@ -1,5 +1,6 @@
 .venv/
 out/
+ai-output/
 __pycache__/
 *.pyc
 *.bak
