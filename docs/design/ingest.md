@@ -224,7 +224,7 @@ This is a JSON array where each element describes one ingest source:
 | `kind` | string | One of `code_repo`, `docs_site`, `tracker`, `secondary_repo`, `self` |
 | `status` | string | `success`, `skipped`, or `failed` |
 | `reason` | string \| null | `null` on success; a one-line explanation for `skipped` or `failed` |
-| `counts` | object | Source-specific counts (e.g. `{commits, prs}` for spine; `{issues}` for tracker) |
+| `counts` | object | Source-specific counts (e.g. `{commits, prs}` for `code_repo`; `{issues}` for tracker) |
 
 **Independent-source rule:** each source runs in its own guard. A failed or missing
 source records `failed` and the run continues — one broken source does not prevent
