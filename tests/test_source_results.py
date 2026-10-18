@@ -267,7 +267,7 @@ try:
     assert _sec_raise_entry is not None, "FAIL: no sec-raise entry in results"
     assert _sec_ok_entry is not None, "FAIL: no sec-ok entry in results"
 
-    check("raising-source: run continues", rc5 is not None, True)
+    check("raising-source: run returns an int", isinstance(rc5, int), True)
     check("raising-source: failed source has status failed", _sec_raise_entry["status"], "failed")
     check("raising-source: failed source has reason",
           "deliberate raise for sec-raise" in _sec_raise_entry["reason"], True)

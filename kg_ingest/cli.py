@@ -615,7 +615,7 @@ def main(argv=None) -> int:
 
         return 1 if _spine_incomplete or not conforms else 0
     except Exception as exc:
-        results.append({"source": "ingest:*", "kind": "ingest", "status": "failed", "reason": str(exc)})
+        results.append({"source": "ingest:*", "kind": "ingest", "status": "failed", "reason": str(exc), "counts": {}})
         raise
     finally:
         (_ai_out / "source-results.json").write_text(
