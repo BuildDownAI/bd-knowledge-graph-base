@@ -314,6 +314,8 @@ def main(argv=None) -> int:
 
     repo_path = Path(args.repo).resolve()
     OUT_DIR.mkdir(exist_ok=True)
+    results: list[dict] = []
+    _spine_incomplete = False
 
     ds = Dataset()
     spine_g = ds.graph(iris.G_SPINE)
@@ -328,11 +330,20 @@ def main(argv=None) -> int:
                                   doc_exclude=_code_repo_cfg.get("doc_exclude"))
         for k, v in s_stats.items():
             print(f"   {k}: {v}")
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
+                        "status": "success", "reason": None, "counts": s_stats})
     except spine.PRCommentsIncomplete as exc:
         for k, v in exc.stats.items():
             print(f"   {k}: {v}")
         print("KG_PR_COMMENTS_INCOMPLETE")
-        return 1
+        _spine_incomplete = True
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
+                        "status": "failed", "reason": "PRCommentsIncomplete",
+                        "counts": dict(exc.stats)})
+    except Exception as exc:
+        print(f"spine ingest FAILED: {exc}")
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
+                        "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- docs_sites: crawl published documentation into the spine graph ----
     # Load prior spine graph for incremental refresh (skip re-chunking unchanged pages)
@@ -347,13 +358,39 @@ def main(argv=None) -> int:
             pass
 
     _docs_sites = _src_cfg.get("docs_sites") or []
+    _docs_site_urls = [
+        (entry.get("url") or "").rstrip("/")
+        for entry in _docs_sites
+        if (entry.get("url") or "").strip()
+    ]
     if not args.docs_sites:
         print("docs_sites: skipped (--no-docs-sites)")
+        if _docs_site_urls:
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
+        else:
+            results.append({"source": "docs_site:*", "kind": "docs_site",
+                            "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
     elif _docs_sites:
         print("== docs_sites ingest ==")
-        ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
-        for k, v in ds_stats.items():
-            print(f"   {k}: {v}")
+        try:
+            ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
+            for k, v in ds_stats.items():
+                print(f"   {k}: {v}")
+            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "success", "reason": None, "counts": ds_stats})
+        except Exception as exc:
+            print(f"docs_sites ingest FAILED: {exc}")
+            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "failed", "reason": str(exc), "counts": {}})
+    else:
+        results.append({"source": "docs_site:*", "kind": "docs_site",
+                        "status": "skipped", "reason": "no docs_sites configured", "counts": {}})
 
     # ---- mcp_sources: ingest MCP-served resources into the spine graph ----
     _mcp_sources = _src_cfg.get("mcp_sources") or []
@@ -388,21 +425,47 @@ def main(argv=None) -> int:
                 issues_override = json.load(_f)
             if os.environ.get("LINEAR_API_KEY"):
                 print("tracker: LINEAR_API_KEY set but --tracker-data given — file wins")
-        tr_stats = tracker.add_tracker(spine_g, tr_run_g, args.repo_slug, tr_run_id,
-                                       pipeline_ver=args.pipeline_ver,
-                                       issues_override=issues_override)
-        for k, v in tr_stats.items():
-            print(f"   {k}: {v}")
+        try:
+            tr_stats = tracker.add_tracker(spine_g, tr_run_g, args.repo_slug, tr_run_id,
+                                           pipeline_ver=args.pipeline_ver,
+                                           issues_override=issues_override)
+            for k, v in tr_stats.items():
+                print(f"   {k}: {v}")
+            for team_label in tr_stats.get("teams", []):
+                m = re.match(r'^(.+?)\([^)]+\):(\d+)$', team_label)
+                team_name = m.group(1) if m else team_label
+                issue_count = int(m.group(2)) if m else 0
+                results.append({"source": f"tracker:{team_name}", "kind": "tracker",
+                                "status": "success", "reason": None,
+                                "counts": {"issues": issue_count}})
+        except Exception as exc:
+            print(f"tracker ingest FAILED: {exc}")
+            _tracker_teams: list[str] = []
+            if issues_override:
+                for _iss in issues_override:
+                    _ident = (_iss.get("identifier") or "").split("-")[0]
+                    if _ident and _ident not in _tracker_teams:
+                        _tracker_teams.append(_ident)
+            if _tracker_teams:
+                for _team in _tracker_teams:
+                    results.append({"source": f"tracker:{_team}", "kind": "tracker",
+                                    "status": "failed", "reason": str(exc), "counts": {}})
+            else:
+                results.append({"source": "tracker:*", "kind": "tracker",
+                                "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
     if args.secondary or args.repos_root:
         for entry in (_src_cfg.get("secondary_repos") or []):
             sec_path = secondary_repo_path(entry, args.repos_root)
+            sec_slug = entry["slug"]
             if not (sec_path / ".git").exists():
                 where = "not under --repos-root" if args.repos_root else "not a clone"
                 print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                "status": "failed",
+                                "reason": f"checkout not found: {sec_path}", "counts": {}})
                 continue
-            sec_slug = entry["slug"]
             print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
             try:
                 ss = spine.add_spine(spine_g, sec_path, sec_slug,
@@ -411,17 +474,26 @@ def main(argv=None) -> int:
                                      doc_exclude=entry.get("doc_exclude"))
                 for k, v in ss.items():
                     print(f"   {k}: {v}")
+                sec_fp = iris.content_hash(sec_slug)
+                sec_run_id = iris.stable_run_id(args.pipeline_ver, sec_fp)
+                sec_run_g = ds.graph(iris.run_graph(sec_run_id))
+                sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
+                                            pipeline_ver=args.pipeline_ver)
+                print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                "status": "success", "reason": None,
+                                "counts": {**ss, **sem}})
             except spine.PRCommentsIncomplete as exc:
                 for k, v in exc.stats.items():
                     print(f"   {k}: {v}")
                 print("KG_PR_COMMENTS_INCOMPLETE")
-                return 1
-            sec_fp = iris.content_hash(sec_slug)
-            sec_run_id = iris.stable_run_id(args.pipeline_ver, sec_fp)
-            sec_run_g = ds.graph(iris.run_graph(sec_run_id))
-            sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
-                                        pipeline_ver=args.pipeline_ver)
-            print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                "status": "failed", "reason": "PRCommentsIncomplete",
+                                "counts": dict(exc.stats)})
+            except Exception as exc:
+                print(f"secondary repo {sec_slug} FAILED: {exc}")
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- self-ingestion: the KG repo itself as a source (sources.yml self_ingest) ----
     # Lets the graph answer questions about its OWN internals (ingest design,
@@ -442,17 +514,29 @@ def main(argv=None) -> int:
                                  max_commits=max_commits, max_prs=args.max_prs)
             for k, v in ss.items():
                 print(f"   {k}: {v}")
+            self_fp = iris.content_hash(f"self:{self_slug}")
+            self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
+            self_run_g = ds.graph(iris.run_graph(self_run_id))
+            sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
+                                             pipeline_ver=args.pipeline_ver)
+            print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+            results.append({"source": f"self:{self_slug}", "kind": "self",
+                            "status": "success", "reason": None,
+                            "counts": {**ss, **sem_self}})
         except spine.PRCommentsIncomplete as exc:
             for k, v in exc.stats.items():
                 print(f"   {k}: {v}")
             print("KG_PR_COMMENTS_INCOMPLETE")
-            return 1
-        self_fp = iris.content_hash(f"self:{self_slug}")
-        self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
-        self_run_g = ds.graph(iris.run_graph(self_run_id))
-        sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
-                                         pipeline_ver=args.pipeline_ver)
-        print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+            results.append({"source": f"self:{self_slug}", "kind": "self",
+                            "status": "failed", "reason": "PRCommentsIncomplete",
+                            "counts": dict(exc.stats)})
+        except Exception as exc:
+            print(f"self ingest FAILED: {exc}")
+            results.append({"source": f"self:{self_slug}", "kind": "self",
+                            "status": "failed", "reason": str(exc), "counts": {}})
+    else:
+        results.append({"source": "self:*", "kind": "self",
+                        "status": "skipped", "reason": "self_ingest: false", "counts": {}})
 
     # ---- graph age stamp: when was this data current? ----
     # Stamped at INGEST (not materialize) so the date lands in the committed
@@ -513,7 +597,13 @@ def main(argv=None) -> int:
     snap = snapshot.write_snapshot(union, SNAP_DIR, ds)
     print(f"== snapshot -> {SNAP_DIR.name}/digest.md + {snap['part_files']} parts ==")
 
-    return 0 if conforms else 1
+    _ai_out = OUT_DIR.parent / "ai-output"
+    _ai_out.mkdir(exist_ok=True)
+    (_ai_out / "source-results.json").write_text(
+        json.dumps(results, indent=2), encoding="utf-8"
+    )
+
+    return 1 if _spine_incomplete or not conforms else 0
 
 
 def _refresh_stats(duration_sec: float) -> dict:
