@@ -1,0 +1,37 @@
+[
+  {
+    "identifier": "TST-1",
+    "title": "Test issue one",
+    "description": "First test issue.",
+    "state": {"name": "Done", "type": "completed"},
+    "comments": []
+  },
+  {
+    "identifier": "TST-2",
+    "title": "Test issue two",
+    "description": "Second test issue.",
+    "state": {"name": "In Progress", "type": "started"},
+    "comments": []
+  },
+  {
+    "identifier": "EXT-1",
+    "title": "External issue one",
+    "description": "First external issue.",
+    "state": {"name": "Done", "type": "completed"},
+    "comments": []
+  },
+  {
+    "identifier": "EXT-2",
+    "title": "External issue two",
+    "description": "Second external issue.",
+    "state": {"name": "To Do", "type": "unstarted"},
+    "comments": []
+  },
+  {
+    "identifier": "EXT-3",
+    "title": "External issue three",
+    "description": "Third external issue.",
+    "state": {"name": "Done", "type": "completed"},
+    "comments": []
+  }
+]
