@@ -208,11 +208,11 @@ This is a JSON array where each element describes one ingest source:
 
 ```json
 [
-  {"source": "your-org/your-project", "kind": "spine",        "status": "success", "reason": null, "counts": {"commits": 120, "prs": 30}},
-  {"source": "docs_sites",            "kind": "docs_sites",   "status": "skipped", "reason": "--no-docs-sites", "counts": {}},
-  {"source": "AII",                   "kind": "tracker",      "status": "success", "reason": null, "counts": {"issues": 42}},
-  {"source": "test-org/sec-repo",     "kind": "secondary_repo","status": "failed", "reason": "checkout not found: /path/to/sec-repo", "counts": {}},
-  {"source": "self",                  "kind": "self",         "status": "skipped", "reason": "self_ingest: false", "counts": {}}
+  {"source": "code_repo:your-org/your-project", "kind": "code_repo",      "status": "success", "reason": null, "counts": {"commits": 120, "prs": 30}},
+  {"source": "docs_site:*",                     "kind": "docs_site",      "status": "skipped", "reason": "--no-docs-sites", "counts": {}},
+  {"source": "tracker:AII",                     "kind": "tracker",        "status": "success", "reason": null, "counts": {"issues": 42}},
+  {"source": "secondary_repo:test-org/sec-repo","kind": "secondary_repo", "status": "failed",  "reason": "checkout not found: /path/to/sec-repo", "counts": {}},
+  {"source": "self:*",                          "kind": "self",           "status": "skipped", "reason": "self_ingest: false", "counts": {}}
 ]
 ```
 
@@ -220,8 +220,8 @@ This is a JSON array where each element describes one ingest source:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `source` | string | Slug, team name, or `"docs_sites"` / `"self"` identifying the source |
-| `kind` | string | One of `spine`, `docs_sites`, `tracker`, `secondary_repo`, `self` |
+| `source` | string | Identifies the source using a `<kind>:<id>` prefix (e.g. `code_repo:your-org/your-project`, `tracker:AII`); `*` is used when no specific id applies (e.g. `self:*` when `self_ingest: false`, `docs_site:*` when no URLs are configured). When `self_ingest: true`, the slug form `self:<slug>` is used instead. |
+| `kind` | string | One of `code_repo`, `docs_site`, `tracker`, `secondary_repo`, `self` |
 | `status` | string | `success`, `skipped`, or `failed` |
 | `reason` | string \| null | `null` on success; a one-line explanation for `skipped` or `failed` |
 | `counts` | object | Source-specific counts (e.g. `{commits, prs}` for spine; `{issues}` for tracker) |
