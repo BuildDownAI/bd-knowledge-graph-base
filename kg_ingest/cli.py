@@ -258,6 +258,12 @@ def _ingest_mcp_sources(spine_g: Graph, mcp_sources_cfg: list) -> dict:
     return {"mcp_pages": total_pages, "mcp_sections": total_sections}
 
 
+def _tracker_team(iss: dict) -> str:
+    """Compute tracker team for an issue using the same order as add_tracker."""
+    ident = iss.get("identifier") or ""
+    return iss.get("team") or (ident.split("-")[0] if "-" in ident else "UNKNOWN")
+
+
 def secondary_repo_path(entry: dict, repos_root: str | None) -> Path:
     """Where a sources.yml secondary_repos entry is cloned.
 
@@ -314,296 +320,307 @@ def main(argv=None) -> int:
 
     repo_path = Path(args.repo).resolve()
     OUT_DIR.mkdir(exist_ok=True)
+    _ai_out = OUT_DIR.parent / "ai-output"
+    _ai_out.mkdir(exist_ok=True)
     results: list[dict] = []
     _spine_incomplete = False
 
-    ds = Dataset()
-    spine_g = ds.graph(iris.G_SPINE)
-    max_commits = None if args.max_commits == 0 else args.max_commits
-
-    _code_repo_cfg = _src_cfg.get("code_repo") or {}
-    print("== spine ingest ==")
     try:
-        s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
-                                  max_commits=max_commits, max_prs=args.max_prs,
-                                  docs_url=_code_repo_cfg.get("docs_url"),
-                                  doc_exclude=_code_repo_cfg.get("doc_exclude"))
-        for k, v in s_stats.items():
-            print(f"   {k}: {v}")
-        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
-                        "status": "success", "reason": None, "counts": s_stats})
-    except spine.PRCommentsIncomplete as exc:
-        for k, v in exc.stats.items():
-            print(f"   {k}: {v}")
-        print("KG_PR_COMMENTS_INCOMPLETE")
-        _spine_incomplete = True
-        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
-                        "status": "failed", "reason": "PRCommentsIncomplete",
-                        "counts": dict(exc.stats)})
-    except Exception as exc:
-        print(f"spine ingest FAILED: {exc}")
-        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
-                        "status": "failed", "reason": str(exc), "counts": {}})
+        ds = Dataset()
+        spine_g = ds.graph(iris.G_SPINE)
+        max_commits = None if args.max_commits == 0 else args.max_commits
 
-    # ---- docs_sites: crawl published documentation into the spine graph ----
-    # Load prior spine graph for incremental refresh (skip re-chunking unchanged pages)
-    _prior_spine_g: Graph | None = None
-    _prior_trig = OUT_DIR / "graph.trig"
-    if _prior_trig.exists():
+        _code_repo_cfg = _src_cfg.get("code_repo") or {}
+        print("== spine ingest ==")
         try:
-            _prior_ds = Dataset()
-            _prior_ds.parse(str(_prior_trig), format="trig")
-            _prior_spine_g = _prior_ds.graph(iris.G_SPINE)
-        except Exception:
-            pass
-
-    _docs_sites = _src_cfg.get("docs_sites") or []
-    _docs_site_urls = [
-        (entry.get("url") or "").rstrip("/")
-        for entry in _docs_sites
-        if (entry.get("url") or "").strip()
-    ]
-    if not args.docs_sites:
-        print("docs_sites: skipped (--no-docs-sites)")
-        if _docs_site_urls:
-            for _url in _docs_site_urls:
-                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
-                                "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
-        else:
-            results.append({"source": "docs_site:*", "kind": "docs_site",
-                            "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
-    elif _docs_sites:
-        print("== docs_sites ingest ==")
-        try:
-            ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
-            for k, v in ds_stats.items():
+            s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
+                                      max_commits=max_commits, max_prs=args.max_prs,
+                                      docs_url=_code_repo_cfg.get("docs_url"),
+                                      doc_exclude=_code_repo_cfg.get("doc_exclude"))
+            for k, v in s_stats.items():
                 print(f"   {k}: {v}")
-            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
-            for _url in _docs_site_urls:
-                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
-                                "status": "success", "reason": None, "counts": ds_stats})
-        except Exception as exc:
-            print(f"docs_sites ingest FAILED: {exc}")
-            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
-            for _url in _docs_site_urls:
-                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
-                                "status": "failed", "reason": str(exc), "counts": {}})
-    else:
-        results.append({"source": "docs_site:*", "kind": "docs_site",
-                        "status": "skipped", "reason": "no docs_sites configured", "counts": {}})
-
-    # ---- mcp_sources: ingest MCP-served resources into the spine graph ----
-    _mcp_sources = _src_cfg.get("mcp_sources") or []
-    if _mcp_sources:
-        print("== mcp_sources ingest ==")
-        mcp_stats = _ingest_mcp_sources(spine_g, _mcp_sources)
-        for k, v in mcp_stats.items():
-            print(f"   {k}: {v}")
-
-    # deterministic run id from pipeline ver + corpus fingerprint
-    fingerprint = iris.content_hash(
-        str(sorted(p.name for p in (repo_path / "docs" / "solutions").rglob("*.md")))
-    )
-    run_id = iris.stable_run_id(args.pipeline_ver, fingerprint)
-    run_g = ds.graph(iris.run_graph(run_id))
-
-    print(f"== semantic ingest (run {run_id}) ==")
-    sem_stats = semantic.add_semantic(run_g, repo_path, args.repo_slug, run_id,
-                                      pipeline_ver=args.pipeline_ver)
-    for k, v in sem_stats.items():
-        print(f"   {k}: {v}")
-
-    # ---- tracker ingest (opt-in; Linear issues + comment learnings) ----
-    if args.tracker or args.tracker_data:
-        from . import tracker
-        tr_run_id = f"tracker-{run_id}"
-        tr_run_g = ds.graph(iris.run_graph(tr_run_id))
-        print(f"== tracker ingest (run {tr_run_id}) ==")
-        issues_override = None
-        if args.tracker_data:
-            with open(args.tracker_data, encoding="utf-8") as _f:
-                issues_override = json.load(_f)
-            if os.environ.get("LINEAR_API_KEY"):
-                print("tracker: LINEAR_API_KEY set but --tracker-data given — file wins")
-        try:
-            tr_stats = tracker.add_tracker(spine_g, tr_run_g, args.repo_slug, tr_run_id,
-                                           pipeline_ver=args.pipeline_ver,
-                                           issues_override=issues_override)
-            for k, v in tr_stats.items():
-                print(f"   {k}: {v}")
-            for team_label in tr_stats.get("teams", []):
-                m = re.match(r'^(.+?)\([^)]+\):(\d+)$', team_label)
-                team_name = m.group(1) if m else team_label
-                issue_count = int(m.group(2)) if m else 0
-                results.append({"source": f"tracker:{team_name}", "kind": "tracker",
-                                "status": "success", "reason": None,
-                                "counts": {"issues": issue_count}})
-        except Exception as exc:
-            print(f"tracker ingest FAILED: {exc}")
-            _tracker_teams: list[str] = []
-            if issues_override:
-                for _iss in issues_override:
-                    _ident = (_iss.get("identifier") or "").split("-")[0]
-                    if _ident and _ident not in _tracker_teams:
-                        _tracker_teams.append(_ident)
-            if _tracker_teams:
-                for _team in _tracker_teams:
-                    results.append({"source": f"tracker:{_team}", "kind": "tracker",
-                                    "status": "failed", "reason": str(exc), "counts": {}})
-            else:
-                results.append({"source": "tracker:*", "kind": "tracker",
-                                "status": "failed", "reason": str(exc), "counts": {}})
-
-    # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
-    if args.secondary or args.repos_root:
-        for entry in (_src_cfg.get("secondary_repos") or []):
-            sec_path = secondary_repo_path(entry, args.repos_root)
-            sec_slug = entry["slug"]
-            if not (sec_path / ".git").exists():
-                where = "not under --repos-root" if args.repos_root else "not a clone"
-                print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
-                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
-                                "status": "failed",
-                                "reason": f"checkout not found: {sec_path}", "counts": {}})
-                continue
-            print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
-            try:
-                ss = spine.add_spine(spine_g, sec_path, sec_slug,
-                                     max_commits=max_commits, max_prs=args.max_prs,
-                                     docs_url=entry.get("docs_url"),
-                                     doc_exclude=entry.get("doc_exclude"))
-                for k, v in ss.items():
-                    print(f"   {k}: {v}")
-                sec_fp = iris.content_hash(sec_slug)
-                sec_run_id = iris.stable_run_id(args.pipeline_ver, sec_fp)
-                sec_run_g = ds.graph(iris.run_graph(sec_run_id))
-                sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
-                                            pipeline_ver=args.pipeline_ver)
-                print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
-                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
-                                "status": "success", "reason": None,
-                                "counts": {**ss, **sem}})
-            except spine.PRCommentsIncomplete as exc:
-                for k, v in exc.stats.items():
-                    print(f"   {k}: {v}")
-                print("KG_PR_COMMENTS_INCOMPLETE")
-                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
-                                "status": "failed", "reason": "PRCommentsIncomplete",
-                                "counts": dict(exc.stats)})
-            except Exception as exc:
-                print(f"secondary repo {sec_slug} FAILED: {exc}")
-                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
-                                "status": "failed", "reason": str(exc), "counts": {}})
-
-    # ---- self-ingestion: the KG repo itself as a source (sources.yml self_ingest) ----
-    # Lets the graph answer questions about its OWN internals (ingest design,
-    # query tools, past changes) — the KG knows itself. Off by default.
-    from . import sources as _sources_mod
-    _cfg = _sources_mod.load()
-    if _cfg.get("self_ingest"):
-        self_root = OUT_DIR.parent
-        try:
-            origin = subprocess.run(["git", "-C", str(self_root), "remote", "get-url", "origin"],
-                                    capture_output=True, text=True, check=True).stdout.strip()
-            self_slug = "/".join(origin.removesuffix(".git").split("/")[-2:])
-        except Exception:
-            self_slug = "local/knowledge-graph"
-        print(f"== self-ingest: {self_slug} ({self_root}) ==")
-        try:
-            ss = spine.add_spine(spine_g, self_root, self_slug,
-                                 max_commits=max_commits, max_prs=args.max_prs)
-            for k, v in ss.items():
-                print(f"   {k}: {v}")
-            self_fp = iris.content_hash(f"self:{self_slug}")
-            self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
-            self_run_g = ds.graph(iris.run_graph(self_run_id))
-            sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
-                                             pipeline_ver=args.pipeline_ver)
-            print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
-            results.append({"source": f"self:{self_slug}", "kind": "self",
-                            "status": "success", "reason": None,
-                            "counts": {**ss, **sem_self}})
+            results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
+                            "status": "success", "reason": None, "counts": s_stats})
         except spine.PRCommentsIncomplete as exc:
             for k, v in exc.stats.items():
                 print(f"   {k}: {v}")
             print("KG_PR_COMMENTS_INCOMPLETE")
-            results.append({"source": f"self:{self_slug}", "kind": "self",
+            _spine_incomplete = True
+            results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
                             "status": "failed", "reason": "PRCommentsIncomplete",
                             "counts": dict(exc.stats)})
         except Exception as exc:
-            print(f"self ingest FAILED: {exc}")
-            results.append({"source": f"self:{self_slug}", "kind": "self",
+            print(f"spine ingest FAILED: {exc}")
+            results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
                             "status": "failed", "reason": str(exc), "counts": {}})
-    else:
-        results.append({"source": "self:*", "kind": "self",
-                        "status": "skipped", "reason": "self_ingest: false", "counts": {}})
 
-    # ---- graph age stamp: when was this data current? ----
-    # Stamped at INGEST (not materialize) so the date lands in the committed
-    # snapshot parts and survives snapshot -> materialize — a deployed graph
-    # answers its own age via existing tools (kg_neighbors on the spine IRI).
-    # `set` keeps exactly one stamp; a stamp at materialize time would lie
-    # after every no-op redeploy.
-    stamp = Literal(datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-                    datatype=XSD.dateTime)
-    spine_g.set((iris.G_SPINE, DCTERMS.modified, stamp))
-    print(f"== graph age stamp: {stamp} ==")
+        # ---- docs_sites: crawl published documentation into the spine graph ----
+        # Load prior spine graph for incremental refresh (skip re-chunking unchanged pages)
+        _prior_spine_g: Graph | None = None
+        _prior_trig = OUT_DIR / "graph.trig"
+        if _prior_trig.exists():
+            try:
+                _prior_ds = Dataset()
+                _prior_ds.parse(str(_prior_trig), format="trig")
+                _prior_spine_g = _prior_ds.graph(iris.G_SPINE)
+            except Exception:
+                pass
 
-    # ---- serialize named graphs (TriG preserves the spine/run split) ----
-    trig_path = OUT_DIR / "graph.trig"
-    ds.serialize(destination=str(trig_path), format="trig")
-    total = sum(1 for _ in ds.quads((None, None, None, None)))
-    print(f"== serialized {total} quads -> {trig_path} ==")
-
-    # ---- SHACL validation over the union ----
-    union = Graph()
-    for s, p, o, _ in ds.quads((None, None, None, None)):
-        union.add((s, p, o))
-    shapes = ontology.load("shapes.ttl")
-    onto = ontology.load("kg.ttl")
-    union += onto  # class hierarchy available to validation
-    print("== SHACL validation ==")
-    conforms, _rg, rtext = validate(
-        union, shacl_graph=shapes, inference="rdfs",
-        abort_on_first=False, meta_shacl=False,
-    )
-    print(f"   conforms: {conforms}")
-    if not conforms:
-        print(rtext[:4000])
-
-    # ---- demo SPARQL: property-path traversal (the Stardog-native win) ----
-    print("== demo queries (union graph) ==")
-    _demo_queries(union)
-
-    # ---- rebuild the semantic embeddings sidecar (BEFORE the snapshot, so the
-    # digest's Semantic-index line reflects THIS run's vectors). Default on;
-    # skipped gracefully if fastembed isn't installed so core ingest stays light.
-    if args.embed:
-        try:
-            from . import embed as embed_mod
-            from kg_query.store import RdflibStore
-            e = embed_mod.build_embeddings(RdflibStore(trig_path),
-                                              snapshot_dir=SNAP_DIR)
-            if e.get("skipped"):
-                print(f"== embeddings skipped: {e['skipped']} ==")
+        _docs_sites = _src_cfg.get("docs_sites") or []
+        _docs_site_urls = [
+            (entry.get("url") or "").rstrip("/")
+            for entry in _docs_sites
+            if (entry.get("url") or "").strip()
+        ]
+        if not args.docs_sites:
+            print("docs_sites: skipped (--no-docs-sites)")
+            if _docs_site_urls:
+                for _url in _docs_site_urls:
+                    results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                    "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
             else:
-                print(f"== embeddings -> {e['count']} cards in {e.get('batch_count', '?')} batches ({e['model']}, dim {e['dim']}) ==")
-        except ImportError as exc:
-            print(f"== embeddings SKIPPED (fastembed not installed: {exc}); "
-                  f"semantic/hybrid search will be stale — `pip install fastembed` "
-                  f"or pass --no-embed to silence ==")
+                results.append({"source": "docs_site:*", "kind": "docs_site",
+                                "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
+        elif _docs_sites:
+            print("== docs_sites ingest ==")
+            try:
+                ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
+                for k, v in ds_stats.items():
+                    print(f"   {k}: {v}")
+                # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+                for _url in _docs_site_urls:
+                    results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                    "status": "success", "reason": None, "counts": ds_stats})
+            except Exception as exc:
+                print(f"docs_sites ingest FAILED: {exc}")
+                # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+                for _url in _docs_site_urls:
+                    results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                    "status": "failed", "reason": str(exc), "counts": {}})
+        else:
+            results.append({"source": "docs_site:*", "kind": "docs_site",
+                            "status": "skipped", "reason": "no docs_sites configured", "counts": {}})
 
-    # ---- committed, git-diffable snapshot (compact digest + per-type parts) ----
-    snap = snapshot.write_snapshot(union, SNAP_DIR, ds)
-    print(f"== snapshot -> {SNAP_DIR.name}/digest.md + {snap['part_files']} parts ==")
+        # ---- mcp_sources: ingest MCP-served resources into the spine graph ----
+        _mcp_sources = _src_cfg.get("mcp_sources") or []
+        if _mcp_sources:
+            print("== mcp_sources ingest ==")
+            mcp_stats = _ingest_mcp_sources(spine_g, _mcp_sources)
+            for k, v in mcp_stats.items():
+                print(f"   {k}: {v}")
 
-    _ai_out = OUT_DIR.parent / "ai-output"
-    _ai_out.mkdir(exist_ok=True)
-    (_ai_out / "source-results.json").write_text(
-        json.dumps(results, indent=2), encoding="utf-8"
-    )
+        # deterministic run id from pipeline ver + corpus fingerprint
+        fingerprint = iris.content_hash(
+            str(sorted(p.name for p in (repo_path / "docs" / "solutions").rglob("*.md")))
+        )
+        run_id = iris.stable_run_id(args.pipeline_ver, fingerprint)
+        run_g = ds.graph(iris.run_graph(run_id))
 
-    return 1 if _spine_incomplete or not conforms else 0
+        print(f"== semantic ingest (run {run_id}) ==")
+        sem_stats = semantic.add_semantic(run_g, repo_path, args.repo_slug, run_id,
+                                          pipeline_ver=args.pipeline_ver)
+        for k, v in sem_stats.items():
+            print(f"   {k}: {v}")
+
+        # ---- tracker ingest (opt-in; Linear issues + comment learnings) ----
+        if args.tracker or args.tracker_data:
+            from . import tracker
+            tr_run_id = f"tracker-{run_id}"
+            tr_run_g = ds.graph(iris.run_graph(tr_run_id))
+            print(f"== tracker ingest (run {tr_run_id}) ==")
+            issues_override = None
+            if args.tracker_data:
+                with open(args.tracker_data, encoding="utf-8") as _f:
+                    issues_override = json.load(_f)
+                if os.environ.get("LINEAR_API_KEY"):
+                    print("tracker: LINEAR_API_KEY set but --tracker-data given — file wins")
+            if issues_override is not None and not isinstance(issues_override, list):
+                print(f"tracker: tracker-data is not a list ({type(issues_override).__name__}) — skipping")
+                results.append({"source": "tracker:*", "kind": "tracker",
+                                "status": "failed",
+                                "reason": f"tracker-data is not a list: {type(issues_override).__name__}",
+                                "counts": {}})
+            else:
+                try:
+                    tr_stats = tracker.add_tracker(spine_g, tr_run_g, args.repo_slug, tr_run_id,
+                                                   pipeline_ver=args.pipeline_ver,
+                                                   issues_override=issues_override)
+                    for k, v in tr_stats.items():
+                        print(f"   {k}: {v}")
+                    for team_label in tr_stats.get("teams", []):
+                        m = re.match(r'^(.+?)\([^)]+\):(\d+)$', team_label)
+                        team_name = m.group(1) if m else team_label
+                        issue_count = int(m.group(2)) if m else 0
+                        results.append({"source": f"tracker:{team_name}", "kind": "tracker",
+                                        "status": "success", "reason": None,
+                                        "counts": {"issues": issue_count}})
+                except Exception as exc:
+                    print(f"tracker ingest FAILED: {exc}")
+                    _tracker_teams: list[str] = []
+                    if issues_override:
+                        for _iss in issues_override:
+                            _team = _tracker_team(_iss)
+                            if _team not in _tracker_teams:
+                                _tracker_teams.append(_team)
+                    if _tracker_teams:
+                        for _team in _tracker_teams:
+                            results.append({"source": f"tracker:{_team}", "kind": "tracker",
+                                            "status": "failed", "reason": str(exc), "counts": {}})
+                    else:
+                        results.append({"source": "tracker:*", "kind": "tracker",
+                                        "status": "failed", "reason": str(exc), "counts": {}})
+
+        # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
+        if args.secondary or args.repos_root:
+            for entry in (_src_cfg.get("secondary_repos") or []):
+                sec_path = secondary_repo_path(entry, args.repos_root)
+                sec_slug = entry["slug"]
+                if not (sec_path / ".git").exists():
+                    where = "not under --repos-root" if args.repos_root else "not a clone"
+                    print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
+                    results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                    "status": "failed",
+                                    "reason": f"checkout not found: {sec_path}", "counts": {}})
+                    continue
+                print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
+                try:
+                    ss = spine.add_spine(spine_g, sec_path, sec_slug,
+                                         max_commits=max_commits, max_prs=args.max_prs,
+                                         docs_url=entry.get("docs_url"),
+                                         doc_exclude=entry.get("doc_exclude"))
+                    for k, v in ss.items():
+                        print(f"   {k}: {v}")
+                    sec_fp = iris.content_hash(sec_slug)
+                    sec_run_id = iris.stable_run_id(args.pipeline_ver, sec_fp)
+                    sec_run_g = ds.graph(iris.run_graph(sec_run_id))
+                    sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
+                                                pipeline_ver=args.pipeline_ver)
+                    print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
+                    results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                    "status": "success", "reason": None,
+                                    "counts": {**ss, **sem}})
+                except spine.PRCommentsIncomplete as exc:
+                    for k, v in exc.stats.items():
+                        print(f"   {k}: {v}")
+                    print("KG_PR_COMMENTS_INCOMPLETE")
+                    results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                    "status": "failed", "reason": "PRCommentsIncomplete",
+                                    "counts": dict(exc.stats)})
+                except Exception as exc:
+                    print(f"secondary repo {sec_slug} FAILED: {exc}")
+                    results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                    "status": "failed", "reason": str(exc), "counts": {}})
+
+        # ---- self-ingestion: the KG repo itself as a source (sources.yml self_ingest) ----
+        # Lets the graph answer questions about its OWN internals (ingest design,
+        # query tools, past changes) — the KG knows itself. Off by default.
+        from . import sources as _sources_mod
+        _cfg = _sources_mod.load()
+        if _cfg.get("self_ingest"):
+            self_root = OUT_DIR.parent
+            try:
+                origin = subprocess.run(["git", "-C", str(self_root), "remote", "get-url", "origin"],
+                                        capture_output=True, text=True, check=True).stdout.strip()
+                self_slug = "/".join(origin.removesuffix(".git").split("/")[-2:])
+            except Exception:
+                self_slug = "local/knowledge-graph"
+            print(f"== self-ingest: {self_slug} ({self_root}) ==")
+            try:
+                ss = spine.add_spine(spine_g, self_root, self_slug,
+                                     max_commits=max_commits, max_prs=args.max_prs)
+                for k, v in ss.items():
+                    print(f"   {k}: {v}")
+                self_fp = iris.content_hash(f"self:{self_slug}")
+                self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
+                self_run_g = ds.graph(iris.run_graph(self_run_id))
+                sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
+                                                 pipeline_ver=args.pipeline_ver)
+                print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+                results.append({"source": f"self:{self_slug}", "kind": "self",
+                                "status": "success", "reason": None,
+                                "counts": {**ss, **sem_self}})
+            except spine.PRCommentsIncomplete as exc:
+                for k, v in exc.stats.items():
+                    print(f"   {k}: {v}")
+                print("KG_PR_COMMENTS_INCOMPLETE")
+                results.append({"source": f"self:{self_slug}", "kind": "self",
+                                "status": "failed", "reason": "PRCommentsIncomplete",
+                                "counts": dict(exc.stats)})
+            except Exception as exc:
+                print(f"self ingest FAILED: {exc}")
+                results.append({"source": f"self:{self_slug}", "kind": "self",
+                                "status": "failed", "reason": str(exc), "counts": {}})
+        else:
+            results.append({"source": "self:*", "kind": "self",
+                            "status": "skipped", "reason": "self_ingest: false", "counts": {}})
+
+        # ---- graph age stamp: when was this data current? ----
+        # Stamped at INGEST (not materialize) so the date lands in the committed
+        # snapshot parts and survives snapshot -> materialize — a deployed graph
+        # answers its own age via existing tools (kg_neighbors on the spine IRI).
+        # `set` keeps exactly one stamp; a stamp at materialize time would lie
+        # after every no-op redeploy.
+        stamp = Literal(datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                        datatype=XSD.dateTime)
+        spine_g.set((iris.G_SPINE, DCTERMS.modified, stamp))
+        print(f"== graph age stamp: {stamp} ==")
+
+        # ---- serialize named graphs (TriG preserves the spine/run split) ----
+        trig_path = OUT_DIR / "graph.trig"
+        ds.serialize(destination=str(trig_path), format="trig")
+        total = sum(1 for _ in ds.quads((None, None, None, None)))
+        print(f"== serialized {total} quads -> {trig_path} ==")
+
+        # ---- SHACL validation over the union ----
+        union = Graph()
+        for s, p, o, _ in ds.quads((None, None, None, None)):
+            union.add((s, p, o))
+        shapes = ontology.load("shapes.ttl")
+        onto = ontology.load("kg.ttl")
+        union += onto  # class hierarchy available to validation
+        print("== SHACL validation ==")
+        conforms, _rg, rtext = validate(
+            union, shacl_graph=shapes, inference="rdfs",
+            abort_on_first=False, meta_shacl=False,
+        )
+        print(f"   conforms: {conforms}")
+        if not conforms:
+            print(rtext[:4000])
+
+        # ---- demo SPARQL: property-path traversal (the Stardog-native win) ----
+        print("== demo queries (union graph) ==")
+        _demo_queries(union)
+
+        # ---- rebuild the semantic embeddings sidecar (BEFORE the snapshot, so the
+        # digest's Semantic-index line reflects THIS run's vectors). Default on;
+        # skipped gracefully if fastembed isn't installed so core ingest stays light.
+        if args.embed:
+            try:
+                from . import embed as embed_mod
+                from kg_query.store import RdflibStore
+                e = embed_mod.build_embeddings(RdflibStore(trig_path),
+                                                  snapshot_dir=SNAP_DIR)
+                if e.get("skipped"):
+                    print(f"== embeddings skipped: {e['skipped']} ==")
+                else:
+                    print(f"== embeddings -> {e['count']} cards in {e.get('batch_count', '?')} batches ({e['model']}, dim {e['dim']}) ==")
+            except ImportError as exc:
+                print(f"== embeddings SKIPPED (fastembed not installed: {exc}); "
+                      f"semantic/hybrid search will be stale — `pip install fastembed` "
+                      f"or pass --no-embed to silence ==")
+
+        # ---- committed, git-diffable snapshot (compact digest + per-type parts) ----
+        snap = snapshot.write_snapshot(union, SNAP_DIR, ds)
+        print(f"== snapshot -> {SNAP_DIR.name}/digest.md + {snap['part_files']} parts ==")
+
+        return 1 if _spine_incomplete or not conforms else 0
+    except Exception as exc:
+        results.append({"source": "ingest:*", "kind": "ingest", "status": "failed", "reason": str(exc), "counts": {}})
+        raise
+    finally:
+        (_ai_out / "source-results.json").write_text(
+            json.dumps(results, indent=2), encoding="utf-8"
+        )
 
 
 def _refresh_stats(duration_sec: float) -> dict:
