@@ -201,7 +201,44 @@ a checked-in, diffable **backup** that can rebuild `out/graph.trig` offline.
 > didn't change. That is a real "new extraction run" fact; a tracker-only refresh
 > (docs unchanged) leaves the run-id — and those parts — untouched.
 
-## 6. For later: enterprise ingest tooling (Stardog etc.)
+## 6. Per-source results — `ai-output/source-results.json`
+
+Every `main()` run writes `ai-output/source-results.json` just before returning.
+This is a JSON array where each element describes one ingest source:
+
+```json
+[
+  {"source": "your-org/your-project", "kind": "spine",        "status": "success", "reason": null, "counts": {"commits": 120, "prs": 30}},
+  {"source": "docs_sites",            "kind": "docs_sites",   "status": "skipped", "reason": "--no-docs-sites", "counts": {}},
+  {"source": "AII",                   "kind": "tracker",      "status": "success", "reason": null, "counts": {"issues": 42}},
+  {"source": "test-org/sec-repo",     "kind": "secondary_repo","status": "failed", "reason": "checkout not found: /path/to/sec-repo", "counts": {}},
+  {"source": "self",                  "kind": "self",         "status": "skipped", "reason": "self_ingest: false", "counts": {}}
+]
+```
+
+**Fields:**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `source` | string | Slug, team name, or `"docs_sites"` / `"self"` identifying the source |
+| `kind` | string | One of `spine`, `docs_sites`, `tracker`, `secondary_repo`, `self` |
+| `status` | string | `success`, `skipped`, or `failed` |
+| `reason` | string \| null | `null` on success; a one-line explanation for `skipped` or `failed` |
+| `counts` | object | Source-specific counts (e.g. `{commits, prs}` for spine; `{issues}` for tracker) |
+
+**Independent-source rule:** each source runs in its own guard. A failed or missing
+source records `failed` and the run continues — one broken source does not prevent
+the graph from receiving data from the others. Tracker results are one entry per team.
+SHACL non-conformance and serialization errors still exit non-zero, as they indicate
+a graph-level problem rather than a single-source problem.
+
+The file is written even when sources fail. If serialization itself raises, the file
+may not be written (acceptable — serialization failure is already a hard exit with no
+recovery). AI-Implement reads this file via the `kg-ingest` pipeline step (AII-1468).
+
+---
+
+## 7. For later: enterprise ingest tooling (Stardog etc.)
 
 The current ingest is a hand-rolled Python rebuild → TriG file. That is right for
 this scale, but formal graph platforms offer more sophisticated ingest worth
@@ -223,7 +260,7 @@ Revisit here when one of those becomes real.
 
 ---
 
-## 7. Standing up a KG for a new repo/tracker from scratch
+## 8. Standing up a KG for a new repo/tracker from scratch
 
 The reusable recipe (this repo is the worked example):
 
