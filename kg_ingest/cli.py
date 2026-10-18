@@ -330,19 +330,19 @@ def main(argv=None) -> int:
                                   doc_exclude=_code_repo_cfg.get("doc_exclude"))
         for k, v in s_stats.items():
             print(f"   {k}: {v}")
-        results.append({"source": args.repo_slug, "kind": "spine",
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
                         "status": "success", "reason": None, "counts": s_stats})
     except spine.PRCommentsIncomplete as exc:
         for k, v in exc.stats.items():
             print(f"   {k}: {v}")
         print("KG_PR_COMMENTS_INCOMPLETE")
         _spine_incomplete = True
-        results.append({"source": args.repo_slug, "kind": "spine",
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
                         "status": "failed", "reason": "PRCommentsIncomplete",
                         "counts": dict(exc.stats)})
     except Exception as exc:
         print(f"spine ingest FAILED: {exc}")
-        results.append({"source": args.repo_slug, "kind": "spine",
+        results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
                         "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- docs_sites: crawl published documentation into the spine graph ----
@@ -358,24 +358,38 @@ def main(argv=None) -> int:
             pass
 
     _docs_sites = _src_cfg.get("docs_sites") or []
+    _docs_site_urls = [
+        (entry.get("url") or "").rstrip("/")
+        for entry in _docs_sites
+        if (entry.get("url") or "").strip()
+    ]
     if not args.docs_sites:
         print("docs_sites: skipped (--no-docs-sites)")
-        results.append({"source": "docs_sites", "kind": "docs_sites",
-                        "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
+        if _docs_site_urls:
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
+        else:
+            results.append({"source": "docs_site:*", "kind": "docs_site",
+                            "status": "skipped", "reason": "--no-docs-sites", "counts": {}})
     elif _docs_sites:
         print("== docs_sites ingest ==")
         try:
             ds_stats = _ingest_docs_sites(spine_g, _docs_sites, prior_g=_prior_spine_g)
             for k, v in ds_stats.items():
                 print(f"   {k}: {v}")
-            results.append({"source": "docs_sites", "kind": "docs_sites",
-                            "status": "success", "reason": None, "counts": ds_stats})
+            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "success", "reason": None, "counts": ds_stats})
         except Exception as exc:
             print(f"docs_sites ingest FAILED: {exc}")
-            results.append({"source": "docs_sites", "kind": "docs_sites",
-                            "status": "failed", "reason": str(exc), "counts": {}})
+            # _ingest_docs_sites does not report per-site granularity; each configured site gets the shared result
+            for _url in _docs_site_urls:
+                results.append({"source": f"docs_site:{_url}", "kind": "docs_site",
+                                "status": "failed", "reason": str(exc), "counts": {}})
     else:
-        results.append({"source": "docs_sites", "kind": "docs_sites",
+        results.append({"source": "docs_site:*", "kind": "docs_site",
                         "status": "skipped", "reason": "no docs_sites configured", "counts": {}})
 
     # ---- mcp_sources: ingest MCP-served resources into the spine graph ----
@@ -421,13 +435,24 @@ def main(argv=None) -> int:
                 m = re.match(r'^(.+?)\([^)]+\):(\d+)$', team_label)
                 team_name = m.group(1) if m else team_label
                 issue_count = int(m.group(2)) if m else 0
-                results.append({"source": team_name, "kind": "tracker",
+                results.append({"source": f"tracker:{team_name}", "kind": "tracker",
                                 "status": "success", "reason": None,
                                 "counts": {"issues": issue_count}})
         except Exception as exc:
             print(f"tracker ingest FAILED: {exc}")
-            results.append({"source": "tracker", "kind": "tracker",
-                            "status": "failed", "reason": str(exc), "counts": {}})
+            _tracker_teams: list[str] = []
+            if issues_override:
+                for _iss in issues_override:
+                    _ident = (_iss.get("identifier") or "").split("-")[0]
+                    if _ident and _ident not in _tracker_teams:
+                        _tracker_teams.append(_ident)
+            if _tracker_teams:
+                for _team in _tracker_teams:
+                    results.append({"source": f"tracker:{_team}", "kind": "tracker",
+                                    "status": "failed", "reason": str(exc), "counts": {}})
+            else:
+                results.append({"source": "tracker:*", "kind": "tracker",
+                                "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- secondary repos (skills, …) into the SAME graph, cross-linked ----
     if args.secondary or args.repos_root:
@@ -437,7 +462,7 @@ def main(argv=None) -> int:
             if not (sec_path / ".git").exists():
                 where = "not under --repos-root" if args.repos_root else "not a clone"
                 print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
-                results.append({"source": sec_slug, "kind": "secondary_repo",
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
                                 "status": "failed",
                                 "reason": f"checkout not found: {sec_path}", "counts": {}})
                 continue
@@ -455,19 +480,19 @@ def main(argv=None) -> int:
                 sem = semantic.add_semantic(sec_run_g, sec_path, sec_slug, sec_run_id,
                                             pipeline_ver=args.pipeline_ver)
                 print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem.items()))
-                results.append({"source": sec_slug, "kind": "secondary_repo",
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
                                 "status": "success", "reason": None,
                                 "counts": {**ss, **sem}})
             except spine.PRCommentsIncomplete as exc:
                 for k, v in exc.stats.items():
                     print(f"   {k}: {v}")
                 print("KG_PR_COMMENTS_INCOMPLETE")
-                results.append({"source": sec_slug, "kind": "secondary_repo",
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
                                 "status": "failed", "reason": "PRCommentsIncomplete",
                                 "counts": dict(exc.stats)})
             except Exception as exc:
                 print(f"secondary repo {sec_slug} FAILED: {exc}")
-                results.append({"source": sec_slug, "kind": "secondary_repo",
+                results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
                                 "status": "failed", "reason": str(exc), "counts": {}})
 
     # ---- self-ingestion: the KG repo itself as a source (sources.yml self_ingest) ----
@@ -495,22 +520,22 @@ def main(argv=None) -> int:
             sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
                                              pipeline_ver=args.pipeline_ver)
             print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
-            results.append({"source": self_slug, "kind": "self",
+            results.append({"source": f"self:{self_slug}", "kind": "self",
                             "status": "success", "reason": None,
                             "counts": {**ss, **sem_self}})
         except spine.PRCommentsIncomplete as exc:
             for k, v in exc.stats.items():
                 print(f"   {k}: {v}")
             print("KG_PR_COMMENTS_INCOMPLETE")
-            results.append({"source": self_slug, "kind": "self",
+            results.append({"source": f"self:{self_slug}", "kind": "self",
                             "status": "failed", "reason": "PRCommentsIncomplete",
                             "counts": dict(exc.stats)})
         except Exception as exc:
             print(f"self ingest FAILED: {exc}")
-            results.append({"source": self_slug, "kind": "self",
+            results.append({"source": f"self:{self_slug}", "kind": "self",
                             "status": "failed", "reason": str(exc), "counts": {}})
     else:
-        results.append({"source": "self", "kind": "self",
+        results.append({"source": "self:*", "kind": "self",
                         "status": "skipped", "reason": "self_ingest: false", "counts": {}})
 
     # ---- graph age stamp: when was this data current? ----

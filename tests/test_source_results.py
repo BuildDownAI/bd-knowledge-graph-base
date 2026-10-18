@@ -83,18 +83,25 @@ if result.returncode != 0:
 
 results = _read_results()
 
-_docs_entry = next((r for r in results if r["kind"] == "docs_sites"), None)
-assert _docs_entry is not None, "FAIL: no docs_sites entry in source-results.json"
+_docs_entry = next((r for r in results if r["kind"] == "docs_site"), None)
+assert _docs_entry is not None, "FAIL: no docs_site entry in source-results.json"
 check("--no-docs-sites: status is skipped", _docs_entry["status"], "skipped")
 check("--no-docs-sites: reason names the flag", _docs_entry["reason"], "--no-docs-sites")
+# no docs_sites configured → wildcard source
+check("--no-docs-sites: source is docs_site:*", _docs_entry["source"], "docs_site:*")
+check("--no-docs-sites: kind is docs_site", _docs_entry["kind"], "docs_site")
 
 _self_entry = next((r for r in results if r["kind"] == "self"), None)
 assert _self_entry is not None, "FAIL: no self entry in source-results.json"
 check("self_ingest: false: status is skipped", _self_entry["status"], "skipped")
+check("self_ingest: false: source is self:*", _self_entry["source"], "self:*")
+check("self_ingest: false: kind is self", _self_entry["kind"], "self")
 
-_spine_entry = next((r for r in results if r["kind"] == "spine"), None)
-assert _spine_entry is not None, "FAIL: no spine entry in source-results.json"
-check("spine entry status is success", _spine_entry["status"], "success")
+_spine_entry = next((r for r in results if r["kind"] == "code_repo"), None)
+assert _spine_entry is not None, "FAIL: no code_repo entry in source-results.json"
+check("code_repo entry status is success", _spine_entry["status"], "success")
+check("code_repo entry kind is code_repo", _spine_entry["kind"], "code_repo")
+check("code_repo entry source is code_repo:<slug>", _spine_entry["source"], "code_repo:your-org/your-project")
 
 for entry in results:
     assert all(k in entry for k in ("source", "kind", "status", "reason", "counts")), (
@@ -127,14 +134,16 @@ if result3.returncode != 0:
 results3 = _read_results()
 tracker3 = [r for r in results3 if r["kind"] == "tracker"]
 check("two-teams: exactly two tracker entries", len(tracker3), 2)
-team_names3 = {r["source"] for r in tracker3}
-check("two-teams: TST team present", "TST" in team_names3, True)
-check("two-teams: EXT team present", "EXT" in team_names3, True)
+team_sources3 = {r["source"] for r in tracker3}
+check("two-teams: tracker:TST present", "tracker:TST" in team_sources3, True)
+check("two-teams: tracker:EXT present", "tracker:EXT" in team_sources3, True)
 
-tst = next(r for r in tracker3 if r["source"] == "TST")
-ext = next(r for r in tracker3 if r["source"] == "EXT")
+tst = next(r for r in tracker3 if r["source"] == "tracker:TST")
+ext = next(r for r in tracker3 if r["source"] == "tracker:EXT")
 check("two-teams: TST issues count", tst["counts"]["issues"], 2)
 check("two-teams: EXT issues count", ext["counts"]["issues"], 3)
+check("two-teams: TST kind is tracker", tst["kind"], "tracker")
+check("two-teams: EXT kind is tracker", ext["kind"], "tracker")
 
 print("\nTest 3 passed: two-team tracker fixture")
 
@@ -184,15 +193,19 @@ results4 = _read_results()
 _sec_entries = [r for r in results4 if r["kind"] == "secondary_repo"]
 check("secondary repos: two entries", len(_sec_entries), 2)
 
-_present_entry = next((r for r in _sec_entries if r["source"] == "test-org/sec-present"), None)
-_missing_entry = next((r for r in _sec_entries if r["source"] == "test-org/sec-missing"), None)
-assert _present_entry is not None, "FAIL: no sec-present entry"
-assert _missing_entry is not None, "FAIL: no sec-missing entry"
+_present_entry = next((r for r in _sec_entries if r["source"] == "secondary_repo:test-org/sec-present"), None)
+_missing_entry = next((r for r in _sec_entries if r["source"] == "secondary_repo:test-org/sec-missing"), None)
+assert _present_entry is not None, "FAIL: no sec-present entry (expected source='secondary_repo:test-org/sec-present')"
+assert _missing_entry is not None, "FAIL: no sec-missing entry (expected source='secondary_repo:test-org/sec-missing')"
 
 check("sec-present: status is success", _present_entry["status"], "success")
+check("sec-present: kind is secondary_repo", _present_entry["kind"], "secondary_repo")
+check("sec-present: source is secondary_repo:<slug>", _present_entry["source"], "secondary_repo:test-org/sec-present")
 check("sec-present: has counts", bool(_present_entry["counts"]), True)
 
 check("sec-missing: status is failed", _missing_entry["status"], "failed")
+check("sec-missing: kind is secondary_repo", _missing_entry["kind"], "secondary_repo")
+check("sec-missing: source is secondary_repo:<slug>", _missing_entry["source"], "secondary_repo:test-org/sec-missing")
 assert "nonexistent" in _missing_entry["reason"] or "sec-missing" in _missing_entry["reason"], (
     f"FAIL: sec-missing reason should name the missing path, got: {_missing_entry['reason']!r}"
 )
