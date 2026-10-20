@@ -22,12 +22,12 @@ from typing import Optional
 
 _ZERO_SHRINK_PARTS = frozenset({"issue.nt", "comment.nt"})
 
-# Matches piece filenames like commit.00.nt, docpage.01.nt — exactly two digits.
-_PIECE_RE = re.compile(r'^(.+)\.\d{2}\.nt$')
+# Matches piece filenames like commit.00.nt, docpage.01.nt, commit.100.nt.
+_PIECE_RE = re.compile(r'^(.+)\.\d+\.nt$')
 
 
 def _logical_part_name(filename: str) -> str:
-    """Map <type>.<NN>.nt → <type>.nt; pass-through for already-logical names."""
+    """Map <type>.<N+>.nt → <type>.nt; pass-through for already-logical names."""
     m = _PIECE_RE.match(filename)
     return f"{m.group(1)}.nt" if m else filename
 

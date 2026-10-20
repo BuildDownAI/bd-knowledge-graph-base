@@ -26,7 +26,7 @@ ONTO_DIR = Path(__file__).resolve().parent.parent / "ontology"
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 SNAP_DIR = Path(__file__).resolve().parent.parent / "snapshot"
 
-_PIECE_RE = re.compile(r'^(.+)\.\d{2}\.nt$')
+_PIECE_RE = re.compile(r'^(.+)\.\d+\.nt$')
 
 
 def _heading_anchor(heading: str) -> str:
