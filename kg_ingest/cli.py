@@ -326,6 +326,8 @@ def main(argv=None) -> int:
     _ai_out.mkdir(exist_ok=True)
     results: list[dict] = []
     _spine_incomplete = False
+    # Dedup guard: track which slugs have been ingested (slug -> first source label)
+    _ingested_slugs: dict[str, str] = {}
 
     try:
         ds = Dataset()
@@ -333,12 +335,14 @@ def main(argv=None) -> int:
         max_commits = None if args.max_commits == 0 else args.max_commits
 
         _code_repo_cfg = _src_cfg.get("code_repo") or {}
+        _ingested_slugs[args.repo_slug] = f"code_repo:{args.repo_slug}"
         print("== spine ingest ==")
         try:
             s_stats = spine.add_spine(spine_g, repo_path, args.repo_slug,
                                       max_commits=max_commits, max_prs=args.max_prs,
                                       docs_url=_code_repo_cfg.get("docs_url"),
-                                      doc_exclude=_code_repo_cfg.get("doc_exclude"))
+                                      doc_exclude=_code_repo_cfg.get("doc_exclude"),
+                                      history_branch=_code_repo_cfg.get("branch"))
             for k, v in s_stats.items():
                 print(f"   {k}: {v}")
             results.append({"source": f"code_repo:{args.repo_slug}", "kind": "code_repo",
@@ -477,6 +481,13 @@ def main(argv=None) -> int:
             for entry in (_src_cfg.get("secondary_repos") or []):
                 sec_path = secondary_repo_path(entry, args.repos_root)
                 sec_slug = entry["slug"]
+                if sec_slug in _ingested_slugs:
+                    first_source = _ingested_slugs[sec_slug]
+                    print(f"== secondary repo SKIPPED (duplicate of {first_source}): {sec_slug} ==")
+                    results.append({"source": f"secondary_repo:{sec_slug}", "kind": "secondary_repo",
+                                    "status": "skipped",
+                                    "reason": f"duplicate of {first_source}", "counts": {}})
+                    continue
                 if not (sec_path / ".git").exists():
                     where = "not under --repos-root" if args.repos_root else "not a clone"
                     print(f"== secondary repo SKIPPED ({where}): {sec_path} ==")
@@ -484,12 +495,14 @@ def main(argv=None) -> int:
                                     "status": "failed",
                                     "reason": f"checkout not found: {sec_path}", "counts": {}})
                     continue
+                _ingested_slugs[sec_slug] = f"secondary_repo:{sec_slug}"
                 print(f"== secondary spine ingest: {sec_slug} ({sec_path}) ==")
                 try:
                     ss = spine.add_spine(spine_g, sec_path, sec_slug,
                                          max_commits=max_commits, max_prs=args.max_prs,
                                          docs_url=entry.get("docs_url"),
-                                         doc_exclude=entry.get("doc_exclude"))
+                                         doc_exclude=entry.get("doc_exclude"),
+                                         history_branch=entry.get("branch"))
                     for k, v in ss.items():
                         print(f"   {k}: {v}")
                     sec_fp = iris.content_hash(sec_slug)
@@ -526,31 +539,39 @@ def main(argv=None) -> int:
                 self_slug = "/".join(origin.removesuffix(".git").split("/")[-2:])
             except Exception:
                 self_slug = "local/knowledge-graph"
-            print(f"== self-ingest: {self_slug} ({self_root}) ==")
-            try:
-                ss = spine.add_spine(spine_g, self_root, self_slug,
-                                     max_commits=max_commits, max_prs=args.max_prs)
-                for k, v in ss.items():
-                    print(f"   {k}: {v}")
-                self_fp = iris.content_hash(f"self:{self_slug}")
-                self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
-                self_run_g = ds.graph(iris.run_graph(self_run_id))
-                sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
-                                                 pipeline_ver=args.pipeline_ver)
-                print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+            if self_slug in _ingested_slugs:
+                first_source = _ingested_slugs[self_slug]
+                print(f"== self-ingest SKIPPED (duplicate of {first_source}): {self_slug} ==")
                 results.append({"source": f"self:{self_slug}", "kind": "self",
-                                "status": "success", "reason": None,
-                                "counts": {**ss, **sem_self}})
-            except spine.PRCommentsIncomplete as exc:
-                for k, v in exc.stats.items():
-                    print(f"   {k}: {v}")
-                print("KG_PR_COMMENTS_INCOMPLETE")
-                results.append({"source": f"self:{self_slug}", "kind": "self",
-                                "status": "failed", "reason": "PRCommentsIncomplete",
-                                "counts": dict(exc.stats)})
-            except Exception as exc:
-                print(f"self ingest FAILED: {exc}")
-                results.append({"source": f"self:{self_slug}", "kind": "self",
+                                "status": "skipped",
+                                "reason": f"duplicate of {first_source}", "counts": {}})
+            else:
+                _ingested_slugs[self_slug] = f"self:{self_slug}"
+                print(f"== self-ingest: {self_slug} ({self_root}) ==")
+                try:
+                    ss = spine.add_spine(spine_g, self_root, self_slug,
+                                         max_commits=max_commits, max_prs=args.max_prs)
+                    for k, v in ss.items():
+                        print(f"   {k}: {v}")
+                    self_fp = iris.content_hash(f"self:{self_slug}")
+                    self_run_id = iris.stable_run_id(args.pipeline_ver, self_fp)
+                    self_run_g = ds.graph(iris.run_graph(self_run_id))
+                    sem_self = semantic.add_semantic(self_run_g, self_root, self_slug, self_run_id,
+                                                     pipeline_ver=args.pipeline_ver)
+                    print("   semantic: " + ", ".join(f"{k}={v}" for k, v in sem_self.items()))
+                    results.append({"source": f"self:{self_slug}", "kind": "self",
+                                    "status": "success", "reason": None,
+                                    "counts": {**ss, **sem_self}})
+                except spine.PRCommentsIncomplete as exc:
+                    for k, v in exc.stats.items():
+                        print(f"   {k}: {v}")
+                    print("KG_PR_COMMENTS_INCOMPLETE")
+                    results.append({"source": f"self:{self_slug}", "kind": "self",
+                                    "status": "failed", "reason": "PRCommentsIncomplete",
+                                    "counts": dict(exc.stats)})
+                except Exception as exc:
+                    print(f"self ingest FAILED: {exc}")
+                    results.append({"source": f"self:{self_slug}", "kind": "self",
                                 "status": "failed", "reason": str(exc), "counts": {}})
         else:
             results.append({"source": "self:*", "kind": "self",

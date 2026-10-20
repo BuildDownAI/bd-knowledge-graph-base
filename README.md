@@ -68,6 +68,30 @@ and `PYTHONPATH=.` is no longer needed anywhere.
 
 Each `code_repo` and `secondary_repos[]` entry in `sources.yml` accepts an optional `doc_exclude` field (a list of repo-relative path globs) to suppress specific files from being ingested as `kg:Doc` nodes — useful when a repo keeps duplicate doc copies (e.g., `stable/` and `latest/`) and you only want one indexed.
 
+Each entry also accepts an optional `branch` field to pin the history branch read from the clone. When omitted, the clone's current `HEAD` branch is recorded. The ingest checks whether that branch is the repository's GitHub default branch and records the flag on the `kg:Repo` node.
+
+### Repo history fields (KGB-42)
+
+Every `kg:Repo` node now carries:
+- `kg:historyBranch` — the branch the clone was read from (sources.yml `branch:`, else git `HEAD`)
+- `kg:isDefaultBranch` — `true` when the history branch equals the GitHub default branch
+- `kg:snapshotRef` — the full SHA of `HEAD` at ingest time
+
+Every `kg:PullRequest` node now carries:
+- `kg:baseRefName` — the target branch of the PR
+- `kg:mergedAt` — merge timestamp (`xsd:dateTime`), when merged
+- `kg:mergeCommit` — link to the `kg:Commit` node for the merge commit, when that commit is in the ingested history
+
+### PR ingest cap and stats (KGB-42)
+
+PR ingest pages past the previous 200-record silent cap using `gh api --paginate`. A `--max-prs` cap is still enforced, but it is now **reported**: the stats include `prs_total`, `prs_ingested`, and `prs_omitted_reason` when any PRs were dropped.
+
+Repos listed more than once across `code_repo`, `secondary_repos`, and `self_ingest` are deduplicated by slug: the first occurrence wins and repeats are recorded in `ai-output/source-results.json` as `skipped` with reason `duplicate of <first source>`.
+
+### History search (KGB-42)
+
+`kg_repo_history(repo, branch?, since?, until?, pr?, kind?, limit?)` — new MCP tool that returns commits and/or merged PRs for a repo. Filter by branch, date range, or a specific PR number. Also findable via `kg_search`: PR titles and repo names now match keyword queries.
+
 ## Layout
 
 ```
