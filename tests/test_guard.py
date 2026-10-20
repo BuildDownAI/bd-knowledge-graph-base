@@ -185,6 +185,39 @@ def test_count_parts_dir() -> None:
         check("count_parts_dir comment.nt", counts["comment.nt"], 1)
 
 
+def test_piece_to_logical_aggregation() -> None:
+    """count_parts_dir aggregates commit.00.nt + commit.01.nt into commit.nt."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / "commit.00.nt").write_text("<s1> <p> <o> .\n<s2> <p> <o> .\n")
+        (d / "commit.01.nt").write_text("<s3> <p> <o> .\n")
+        counts = count_parts_dir(d)
+        check("piece aggregation: logical key present", "commit.nt" in counts, True)
+        check("piece aggregation: sum is 3", counts["commit.nt"], 3)
+        assert "commit.00.nt" not in counts, "FAIL: piece file should not appear as key"
+        assert "commit.01.nt" not in counts, "FAIL: piece file should not appear as key"
+        print("PASS: count_parts_dir aggregates piece files into logical name")
+
+
+def test_evaluate_pass_after_split() -> None:
+    """evaluate passes when previous and new are equal after logical-name merge."""
+    v = evaluate({"commit.nt": 50}, {"commit.nt": 50})
+    check("split: verdict is pass", v.verdict, "pass")
+    check("split: refusal is None", v.refusal, None)
+    print("PASS: evaluate passes after logical-name merge")
+
+
+def test_zero_shrink_on_reconstructed_issue() -> None:
+    """Zero-shrink rule fires on the logical name even when pieces were aggregated."""
+    v = evaluate({"issue.nt": 100}, {"issue.nt": 99}, issue_count=1)
+    check("zero-shrink reconstructed: verdict is refuse", v.verdict, "refuse")
+    assert v.refusal is not None
+    assert "issue.nt: shrank from 100 to 99 lines" in v.refusal, (
+        f"FAIL: refusal text does not contain expected string: {v.refusal!r}"
+    )
+    print("PASS: zero-shrink fires on reconstructed issue.nt")
+
+
 def main() -> None:
     test_2026_09_12_refuses()
     test_2026_09_12_passes_when_comment_restored()
@@ -195,6 +228,9 @@ def main() -> None:
     test_cli_exit_codes()
     test_cli_json()
     test_count_parts_dir()
+    test_piece_to_logical_aggregation()
+    test_evaluate_pass_after_split()
+    test_zero_shrink_on_reconstructed_issue()
 
     # Import iris only for the namespace stamp — guard.py itself never imports it.
     from kg_ingest import iris

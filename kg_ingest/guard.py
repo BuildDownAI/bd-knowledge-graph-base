@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -20,6 +21,24 @@ from typing import Optional
 
 
 _ZERO_SHRINK_PARTS = frozenset({"issue.nt", "comment.nt"})
+
+# Matches piece filenames like commit.00.nt, docpage.01.nt — exactly two digits.
+_PIECE_RE = re.compile(r'^(.+)\.\d{2}\.nt$')
+
+
+def _logical_part_name(filename: str) -> str:
+    """Map <type>.<NN>.nt → <type>.nt; pass-through for already-logical names."""
+    m = _PIECE_RE.match(filename)
+    return f"{m.group(1)}.nt" if m else filename
+
+
+def _aggregate_to_logical(raw: dict[str, int]) -> dict[str, int]:
+    """Collapse piece filenames into logical names, summing line counts."""
+    result: dict[str, int] = {}
+    for name, count in raw.items():
+        logical = _logical_part_name(name)
+        result[logical] = result.get(logical, 0) + count
+    return result
 
 
 @dataclass
@@ -97,11 +116,15 @@ def evaluate(
 
 
 def count_parts_dir(d: Path) -> dict[str, int]:
-    """Count non-empty lines per .nt file in a snapshot/parts directory."""
-    return {
+    """Count non-empty lines per logical part in a snapshot/parts directory.
+
+    Piece files (<type>.<NN>.nt) are aggregated into their logical name (<type>.nt).
+    """
+    raw = {
         f.name: sum(1 for line in f.read_text(encoding="utf-8").splitlines() if line.strip())
         for f in sorted(d.glob("*.nt"))
     }
+    return _aggregate_to_logical(raw)
 
 
 def _count_parts_gitref(gitref_path: str) -> dict[str, int]:
@@ -134,7 +157,7 @@ def _count_parts_gitref(gitref_path: str) -> dict[str, int]:
             counts[basename] = sum(
                 1 for line in show.stdout.splitlines() if line.strip()
             )
-    return counts
+    return _aggregate_to_logical(counts)
 
 
 def _resolve_parts(arg: str) -> dict[str, int]:
