@@ -287,22 +287,34 @@ def write_snapshot(union: Graph, snap_dir: Path, ds: Dataset | None = None) -> d
     parts = write_parts(union, snap_dir / "parts")
 
     # Fail fast if any committed file still exceeds the safe limit after splitting.
-    # A subject whose triples alone exceed _PART_SIZE_CAP cannot be split further;
-    # the error names the file so the operator can act before the push is attempted.
+    # The advice differs: an oversized parts piece means a single subject's triples
+    # exceed the cap (reduce that subject's data); an oversized embeddings.npz needs
+    # a follow-up to add a split for the embeddings file.
     oversized = sorted(
         (f, f.stat().st_size)
         for f in snap_dir.rglob("*")
         if f.is_file() and f.stat().st_size > _POST_WRITE_FAIL_THRESHOLD
     )
     if oversized:
-        items = "; ".join(
-            f"{f.relative_to(snap_dir)} ({sz / 1024 / 1024:.1f} MB)"
-            for f, sz in oversized
-        )
+        parts_subdir = snap_dir / "parts"
+        clauses: list[str] = []
+        for f, sz in oversized:
+            rel = f.relative_to(snap_dir)
+            size_str = f"{sz / 1024 / 1024:.1f} MB"
+            if f.is_relative_to(parts_subdir):
+                clauses.append(
+                    f"{rel} ({size_str}): a single subject's triples exceed the "
+                    f"50 MB piece cap and cannot be split further — reduce that "
+                    f"subject's data or exclude its source"
+                )
+            else:
+                clauses.append(
+                    f"{rel} ({size_str}): file exceeds the 95 MB limit — "
+                    f"file a follow-up to add a split for this file"
+                )
         raise SystemExit(
-            f"[snapshot] file(s) over 95 MB after write — ingest aborted: {items}. "
-            f"A subject with more triples than the 50 MB piece cap cannot be split "
-            f"further; raise _PART_SIZE_CAP or restructure the data."
+            "[snapshot] file(s) over 95 MB after write — ingest aborted:\n"
+            + "\n".join(f"  {c}" for c in clauses)
         )
 
     return {"parts": parts, "part_files": len(parts)}

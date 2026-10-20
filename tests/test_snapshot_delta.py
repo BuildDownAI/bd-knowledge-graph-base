@@ -166,6 +166,12 @@ def test_write_snapshot_fails_on_oversized_file() -> None:
             assert "96" in msg or "MB" in msg.upper(), (
                 f"exit message should mention size; got: {msg!r}"
             )
+            assert "raise _PART_SIZE_CAP" not in msg, (
+                f"exit message must not advise raising _PART_SIZE_CAP; got: {msg!r}"
+            )
+            assert "follow-up" in msg.lower(), (
+                f"exit message for embeddings.npz must mention follow-up; got: {msg!r}"
+            )
         print("PASS: write_snapshot fails with clear message on oversized file")
 
 

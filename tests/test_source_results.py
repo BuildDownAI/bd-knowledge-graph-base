@@ -110,6 +110,17 @@ for entry in results:
     )
 check("all entries have required keys", True, True)
 
+_last_line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+try:
+    _stats = json.loads(_last_line)
+    check("refresh stats: embeddingsBytes key present", "embeddingsBytes" in _stats, True)
+    check("refresh stats: embeddingsBytes is int", isinstance(_stats["embeddingsBytes"], int), True)
+    check("refresh stats: largestSnapshotFile key present", "largestSnapshotFile" in _stats, True)
+    check("refresh stats: largestSnapshotBytes key present", "largestSnapshotBytes" in _stats, True)
+    check("refresh stats: largestSnapshotBytes is int", isinstance(_stats["largestSnapshotBytes"], int), True)
+except json.JSONDecodeError:
+    assert False, f"FAIL: last stdout line is not valid JSON: {_last_line!r}"
+
 print("\nTest 1 passed: --no-docs-sites and self_ingest: false")
 
 # ---- Test 2: two-team tracker writes two tracker entries ----
