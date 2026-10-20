@@ -197,6 +197,47 @@ def test_nt_parts_store_parity():
     print("test_nt_parts_store_parity: OK")
 
 
+def test_split_parts_materialize_roundtrip():
+    """write_parts with a small cap splits into pieces; materialize_graph still loads all triples."""
+    src = _fixture_union()
+    with tempfile.TemporaryDirectory() as d:
+        parts = Path(d) / "parts"
+        out = Path(d) / "out"
+        snapshot.write_parts(src, parts, _cap=1)
+
+        piece_files = list(parts.glob("*.*.nt"))
+        assert len(piece_files) > 0, "Expected piece files with _cap=1"
+
+        n = materialize.materialize_graph(parts_dir=parts, out_dir=out)
+        assert n == len(src), f"materialize triple count {n} != source {len(src)}"
+
+        ds = Dataset()
+        ds.parse(str(out / "graph.trig"), format="trig")
+        rebuilt = Graph()
+        for quad in ds:
+            rebuilt.add(quad[:3])
+        assert set(rebuilt) == set(src), "materialized graph is not triple-identical to source after split"
+    print("test_split_parts_materialize_roundtrip: OK")
+
+
+def test_split_parts_copy_parts_roundtrip():
+    """copy_parts + NtPartsStore loads all triples even when parts are split into pieces."""
+    from kg_query.store import NtPartsStore
+
+    src = _fixture_union()
+    with tempfile.TemporaryDirectory() as d:
+        parts = Path(d) / "parts"
+        out = Path(d) / "out"
+        snapshot.write_parts(src, parts, _cap=1)
+
+        materialize.copy_parts(parts_dir=parts, out_dir=out)
+        store = NtPartsStore(parts_dir=out / "parts")
+        assert len(store._g) == len(src), (
+            f"NtPartsStore triple count {len(store._g)} != source {len(src)}"
+        )
+    print("test_split_parts_copy_parts_roundtrip: OK")
+
+
 if __name__ == "__main__":
     test_fastembed_not_imported()
     test_materialize_roundtrip()
@@ -205,3 +246,5 @@ if __name__ == "__main__":
     test_missing_npz_exits_nonzero()
     test_copy_parts_roundtrip()
     test_nt_parts_store_parity()
+    test_split_parts_materialize_roundtrip()
+    test_split_parts_copy_parts_roundtrip()

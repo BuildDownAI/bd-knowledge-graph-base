@@ -13,15 +13,17 @@ Run:
 way to change it). Run it twice and verify the file is byte-identical both
 times before committing.
 """
+import hashlib
 import json
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from rdflib import Graph
+from rdflib import Graph, Literal, URIRef
+from rdflib.namespace import RDF
 
-from kg_ingest.snapshot import write_parts
+from kg_ingest.snapshot import write_parts, write_snapshot
 from kg_ingest.spine import add_spine
 from kg_ingest.tracker import _add_issue, _bind, _run_node
 
@@ -87,7 +89,91 @@ def _build_union() -> Graph:
         return union
 
 
+def test_write_parts_splits_with_small_cap() -> None:
+    """With a tiny cap, write_parts splits into <type>.00.nt pieces; no subject spans pieces."""
+    from kg_ingest.iris import NAMESPACE as NS
+    g = Graph()
+    s1 = URIRef(f"{NS}resource/issue/EX-1")
+    s2 = URIRef(f"{NS}resource/issue/EX-2")
+    rdf_type = URIRef("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
+    tp = URIRef(f"{NS}onto#Issue")
+    g.add((s1, rdf_type, tp))
+    g.add((s2, rdf_type, tp))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        parts_dir = Path(tmp) / "parts"
+        result = write_parts(g, parts_dir, _cap=1)
+
+        assert "issue" in result, f"Expected 'issue' in result keys, got: {list(result.keys())}"
+        assert not (parts_dir / "issue.nt").exists(), "Expected piece files, not single issue.nt"
+
+        piece_files = sorted(parts_dir.glob("issue.*.nt"))
+        assert len(piece_files) >= 1, f"Expected piece files, got: {list(parts_dir.glob('*.nt'))}"
+
+        seen_subjects: dict[str, str] = {}
+        for pf in piece_files:
+            for line in pf.read_text().splitlines():
+                if not line.strip():
+                    continue
+                subj = line[:line.index('>') + 1]
+                assert subj not in seen_subjects, (
+                    f"Subject {subj} appears in {seen_subjects[subj]} and {pf.name}"
+                )
+                seen_subjects[subj] = pf.name
+
+        print(f"PASS: write_parts splits into pieces: {[f.name for f in piece_files]}")
+
+
+def test_write_parts_deterministic() -> None:
+    """Two runs on the same graph produce byte-identical files."""
+    union = _build_union()
+
+    with tempfile.TemporaryDirectory() as tmp1, tempfile.TemporaryDirectory() as tmp2:
+        parts1 = Path(tmp1) / "parts"
+        parts2 = Path(tmp2) / "parts"
+        write_parts(union, parts1)
+        write_parts(union, parts2)
+
+        files1 = {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+                  for f in sorted(parts1.glob("*.nt"))}
+        files2 = {f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+                  for f in sorted(parts2.glob("*.nt"))}
+
+        assert files1 == files2, (
+            f"Two runs differ: {set(files1.items()) ^ set(files2.items())}"
+        )
+        print(f"PASS: write_parts is deterministic ({len(files1)} files)")
+
+
+def test_write_snapshot_fails_on_oversized_file() -> None:
+    """write_snapshot raises SystemExit if any file in snap_dir exceeds 95 MB."""
+    from kg_ingest.iris import NAMESPACE as NS
+    g = Graph()
+    g.add((URIRef(f"{NS}resource/issue/EX-1"), RDF.type, URIRef(f"{NS}onto#Issue")))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        snap_dir = Path(tmp) / "snapshot"
+        snap_dir.mkdir()
+        large_file = snap_dir / "embeddings.npz"
+        large_file.write_bytes(b"x" * (96 * 1024 * 1024))
+
+        try:
+            write_snapshot(g, snap_dir)
+            assert False, "write_snapshot should have raised SystemExit"
+        except SystemExit as exc:
+            msg = str(exc)
+            assert "embeddings.npz" in msg, f"exit message must name the file; got: {msg!r}"
+            assert "96" in msg or "MB" in msg.upper(), (
+                f"exit message should mention size; got: {msg!r}"
+            )
+        print("PASS: write_snapshot fails with clear message on oversized file")
+
+
 def main() -> None:
+    test_write_parts_splits_with_small_cap()
+    test_write_parts_deterministic()
+    test_write_snapshot_fails_on_oversized_file()
+
     write_mode = "--write" in sys.argv
 
     union = _build_union()

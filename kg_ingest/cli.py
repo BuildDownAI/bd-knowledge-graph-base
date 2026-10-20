@@ -26,6 +26,8 @@ ONTO_DIR = Path(__file__).resolve().parent.parent / "ontology"
 OUT_DIR = Path(__file__).resolve().parent.parent / "out"
 SNAP_DIR = Path(__file__).resolve().parent.parent / "snapshot"
 
+_PIECE_RE = re.compile(r'^(.+)\.\d+\.nt$')
+
 
 def _heading_anchor(heading: str) -> str:
     """Convert a heading string to a URL-safe anchor slug."""
@@ -636,7 +638,9 @@ def _refresh_stats(duration_sec: float) -> dict:
                 )
             except Exception:
                 count = 0
-            parts[p.name] = count
+            m = _PIECE_RE.match(p.name)
+            logical = f"{m.group(1)}.nt" if m else p.name
+            parts[logical] = parts.get(logical, 0) + count
 
     vectors = 0
     meta_path = OUT_DIR / "embeddings.meta.json"

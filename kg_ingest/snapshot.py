@@ -17,11 +17,22 @@ COMMITTED artifacts alongside it so data changes are reviewable over time:
                              `cat snapshot/parts/*.nt` reconstitutes the graph, so
                              the parts also serve as a checked-in, diffable backup.
 
+                             Large parts (> _PART_SIZE_CAP, default 50 MB) are
+                             written as numbered pieces: <type>.<NN>.nt (e.g.
+                             commit.00.nt, commit.01.nt).  Every triple for a given
+                             subject IRI always lands in the same piece — chosen by
+                             hashlib.sha256(iri).digest()[0] % k, where k is the
+                             smallest power-of-two that keeps every piece under the
+                             cap.  Readers that glob *.nt pick up all pieces with no
+                             change.  Guard rules use the logical name (<type>.nt)
+                             by aggregating piece line counts before comparison.
+
 Determinism is the whole point: NO timestamps, everything sorted. The graph has
 no blank nodes (stable IRIs from stable keys), so identical data => identical bytes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -33,6 +44,9 @@ from .iris import KG as _KG_NS, KGR as _KGR_NS
 
 RESOURCE = str(_KGR_NS)
 KG = str(_KG_NS)
+
+_PART_SIZE_CAP = 50 * 1024 * 1024        # 50 MB: pieces keep GitHub's 100 MB limit safe
+_POST_WRITE_FAIL_THRESHOLD = 95 * 1024 * 1024  # 95 MB: fail fast before push
 
 
 # --------------------------------------------------------------------------- #
@@ -49,10 +63,22 @@ def _subject_type(s) -> str:
     return "other"
 
 
-def write_parts(union: Graph, parts_dir: Path) -> dict[str, int]:
+def _subject_from_nt_line(line: str) -> str:
+    """Extract the subject term (IRI or blank node) from an N-Triples line."""
+    if line.startswith('<'):
+        return line[:line.index('>') + 1]
+    return line.split(' ', 1)[0]
+
+
+def write_parts(union: Graph, parts_dir: Path, _cap: int = _PART_SIZE_CAP) -> dict[str, int]:
     """Split `union` into snapshot/parts/<type>.nt, each sorted for minimal diffs.
 
+    When a type's serialized size exceeds _cap (default 50 MB), the type is written
+    as numbered pieces <type>.<NN>.nt using a stable SHA-256 hash of each subject IRI
+    modulo k (smallest power-of-two that keeps every piece under _cap).
+
     Clears stale *.nt first so a type that disappears doesn't linger.
+    Returns {type_name: total_line_count} with logical names (no piece suffixes).
     """
     parts_dir.mkdir(parents=True, exist_ok=True)
     for old in parts_dir.glob("*.nt"):
@@ -64,9 +90,43 @@ def write_parts(union: Graph, parts_dir: Path) -> dict[str, int]:
 
     written: dict[str, int] = {}
     for t, g in by_type.items():
-        lines = sorted(l for l in g.serialize(format="nt").splitlines() if l.strip())
-        (parts_dir / f"{t}.nt").write_text("\n".join(lines) + "\n")
-        written[t] = len(lines)
+        all_lines = sorted(l for l in g.serialize(format="nt").splitlines() if l.strip())
+        content = "\n".join(all_lines) + "\n"
+
+        if len(content.encode("utf-8")) <= _cap:
+            (parts_dir / f"{t}.nt").write_text(content)
+            written[t] = len(all_lines)
+            continue
+
+        # Type exceeds cap: group triples by subject, then find smallest k (power of 2)
+        # such that every piece stays under _cap.
+        by_subject: dict[str, list[str]] = defaultdict(list)
+        for line in all_lines:
+            by_subject[_subject_from_nt_line(line)].append(line)
+
+        k = 2
+        pieces: dict[int, list[str]] = {}
+        while k <= 256:
+            pieces = defaultdict(list)
+            for iri, triples in by_subject.items():
+                idx = hashlib.sha256(iri.encode()).digest()[0] % k
+                pieces[idx].extend(triples)
+
+            if all(
+                len(("\n".join(sorted(pieces[i])) + "\n").encode("utf-8")) <= _cap
+                for i in pieces
+            ):
+                break
+            k *= 2
+
+        total = 0
+        for idx in range(k):
+            piece_lines = sorted(pieces.get(idx, []))
+            if piece_lines:
+                (parts_dir / f"{t}.{idx:02d}.nt").write_text("\n".join(piece_lines) + "\n")
+                total += len(piece_lines)
+        written[t] = total
+
     return dict(sorted(written.items()))
 
 
@@ -225,6 +285,26 @@ def write_snapshot(union: Graph, snap_dir: Path, ds: Dataset | None = None) -> d
     snap_dir.mkdir(parents=True, exist_ok=True)
     (snap_dir / "digest.md").write_text(build_digest(union, ds))
     parts = write_parts(union, snap_dir / "parts")
+
+    # Fail fast if any committed file still exceeds the safe limit after splitting.
+    # A subject whose triples alone exceed _PART_SIZE_CAP cannot be split further;
+    # the error names the file so the operator can act before the push is attempted.
+    oversized = sorted(
+        (f, f.stat().st_size)
+        for f in snap_dir.rglob("*")
+        if f.is_file() and f.stat().st_size > _POST_WRITE_FAIL_THRESHOLD
+    )
+    if oversized:
+        items = "; ".join(
+            f"{f.relative_to(snap_dir)} ({sz / 1024 / 1024:.1f} MB)"
+            for f, sz in oversized
+        )
+        raise SystemExit(
+            f"[snapshot] file(s) over 95 MB after write — ingest aborted: {items}. "
+            f"A subject with more triples than the 50 MB piece cap cannot be split "
+            f"further; raise _PART_SIZE_CAP or restructure the data."
+        )
+
     return {"parts": parts, "part_files": len(parts)}
 
 
