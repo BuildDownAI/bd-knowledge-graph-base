@@ -105,6 +105,25 @@ git fetch upstream && git merge upstream/main
 Your business config (`sources.yml`, `snapshot/`, `out/`) never conflicts — the
 base never ships real bindings or data.
 
+## Snapshot parts and the 50 MB piece cap
+
+Each `snapshot/parts/<type>.nt` file holds the sorted N-Triples for one subject type
+(issue, comment, commit, …). When a type grows beyond **50 MB** (e.g. a large commit
+history), `write_parts` splits it into numbered pieces: `commit.00.nt`, `commit.01.nt`,
+…. The piece count is the smallest power-of-two that keeps every piece under the cap.
+Every triple for a given subject IRI always lands in the same piece (chosen by a stable
+`sha256(iri)` hash), so unchanged subjects produce byte-identical piece files.
+
+Readers that glob `*.nt` (`materialize_graph`, `copy_parts`, `NtPartsStore`) load all
+pieces automatically with no code change. Guard rules use the **logical name**
+(`<type>.nt`) by aggregating piece line counts before comparison, so `commit.00.nt` +
+`commit.01.nt` are evaluated as `commit.nt` — no accept-new-baseline is needed.
+
+After `write_parts`, the ingest checks every file under `snapshot/` and **aborts with a
+clear error** if any file exceeds **95 MB** (e.g. a single subject whose triples exceed
+the cap, or `embeddings.npz` growing unexpectedly). This fires before the push so
+GitHub never sees the oversized file.
+
 ## Host sizing
 
 `kg_ingest.materialize` loads every `snapshot/parts/*.nt` into one in-memory rdflib
