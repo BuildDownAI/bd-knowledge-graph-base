@@ -6,6 +6,7 @@ emitting RDF into the spine named graph. Re-derivable: same repo state -> same t
 from __future__ import annotations
 
 import fnmatch
+from datetime import datetime
 import json
 import re
 import subprocess
@@ -285,6 +286,18 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _link_tracker(g, c, subject, stats)
         people.add(login)
         stats["commits"] += 1
+        # History range for the refresh stats. Author dates carry their own offsets, so compare parsed values.
+        try:
+            when = datetime.fromisoformat(adate)
+        except ValueError:
+            when = None
+        if when is not None:
+            if "_first_commit" not in stats or when < stats["_first_commit"]:
+                stats["_first_commit"] = when
+                stats["first_commit_date"] = adate
+            if "_last_commit" not in stats or when > stats["_last_commit"]:
+                stats["_last_commit"] = when
+                stats["last_commit_date"] = adate
 
     # --- pull requests (via gh REST API, paginated) ---
     if max_prs:
@@ -393,4 +406,6 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
             stats["pr_error"] = str(e)[:200]
 
     stats["people"] = len(people)
+    stats.pop("_first_commit", None)
+    stats.pop("_last_commit", None)
     return stats

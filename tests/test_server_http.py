@@ -27,6 +27,7 @@ EXPECTED_TOOLS = {
     "kg_neighbors",
     "kg_provenance",
     "kg_path",
+    "kg_repo_history",
 }
 
 FIXTURE = f"""
