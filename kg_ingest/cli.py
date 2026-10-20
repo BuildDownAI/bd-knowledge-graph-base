@@ -651,12 +651,28 @@ def _refresh_stats(duration_sec: float) -> dict:
         except Exception:
             pass
 
+    embed_path = SNAP_DIR / "embeddings.npz"
+    embeddings_bytes = embed_path.stat().st_size if embed_path.exists() else 0
+
+    largest_file = ""
+    largest_bytes = 0
+    if SNAP_DIR.exists():
+        for f in SNAP_DIR.rglob("*"):
+            if f.is_file():
+                sz = f.stat().st_size
+                if sz > largest_bytes:
+                    largest_bytes = sz
+                    largest_file = str(f.relative_to(SNAP_DIR))
+
     return {
         "quads": sum(parts.values()),
         "vectors": vectors,
         "docPages": parts.get("docpage.nt", 0),
         "durationSec": duration_sec,
         "parts": parts,
+        "embeddingsBytes": embeddings_bytes,
+        "largestSnapshotFile": largest_file,
+        "largestSnapshotBytes": largest_bytes,
     }
 
 
