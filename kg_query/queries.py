@@ -36,20 +36,18 @@ def _iri(s: str) -> str:
 # kg_search — topic-based (MVP)
 # --------------------------------------------------------------------------- #
 def kg_search(store: Store, term: str, limit: int = 10) -> dict:
-    """Find learnings whose topic (tag) OR title matches `term` (substring, ci).
+    """Find learnings, decisions, notes, PRs, and repos matching `term` (substring, ci).
 
-    Returns the transferable lesson: title, category, priority, fix snippet, and
-    which topics matched. This is the "first 30 seconds" surface (recon Q1, opt.1).
+    Matches topic/tag labels and titles across semantic nodes (Learning, Decision,
+    ImplementationNote, PlanningNote), PullRequest titles, and Repo names.
     """
     t = _lit(term.lower())
     # Keep all variables at outer scope: a FILTER inside a UNION branch only sees
     # variables bound *within* that branch (SPARQL spec; Stardog enforces it,
     # rdflib does not). So we OPTIONAL the topic then decide the match with BIND.
-    # Learnings, Decisions (ADRs, plans, decision comments), ImplementationNotes
-    # (bot summaries), and PlanningNotes (tracker planning output) are all surfaced.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
+      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote kg:PullRequest kg:Repo }}
       ?learning a ?type ; dcterms:title ?title .
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
@@ -148,6 +146,89 @@ def kg_provenance(store: Store, iri: str) -> dict:
 # --------------------------------------------------------------------------- #
 # kg_path — bounded BFS between two nodes over all edges (both directions)
 # --------------------------------------------------------------------------- #
+def _dt(s: str) -> str:
+    """Normalize a date/datetime string to xsd:dateTime format for SPARQL FILTERs."""
+    if "T" not in s:
+        return s + "T00:00:00Z"
+    return s
+
+
+def kg_repo_history(store: Store, repo: str, branch: str | None = None,
+                    since: str | None = None, until: str | None = None,
+                    pr: int | None = None, kind: str | None = None,
+                    limit: int = 100) -> dict:
+    """Return commits and/or merged PRs for a repo with optional filters.
+
+    repo:   owner/name slug (required)
+    branch: filter commits by repo historyBranch; filter PRs by baseRefName
+    since:  ISO date/datetime lower bound (inclusive) on commit date / PR mergedAt
+    until:  ISO date/datetime upper bound (inclusive) on commit date / PR mergedAt
+    pr:     filter to a specific PR number
+    kind:   "commit", "pr", or None for both
+    limit:  max results returned (default 100)
+    """
+    r = _lit(repo)
+    results: list[dict] = []
+
+    if kind in (None, "commit"):
+        branch_f = f'\n      ?repo kg:historyBranch "{_lit(branch)}" .' if branch else ""
+        date_f = ""
+        if since:
+            date_f += f'\n      FILTER(?date >= "{_lit(_dt(since))}"^^xsd:dateTime)'
+        if until:
+            date_f += f'\n      FILTER(?date <= "{_lit(_dt(until))}"^^xsd:dateTime)'
+        q = PREFIXES + f"""
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?node ?title ?sha ?date WHERE {{
+          ?node a kg:Commit ; kg:partOf ?repo ; dcterms:created ?date .
+          ?repo kg:sourceId "{r}" .{branch_f}
+          OPTIONAL {{ ?node dcterms:title ?title }}
+          OPTIONAL {{ ?node kg:sourceId ?sha }}{date_f}
+        }} ORDER BY DESC(?date) LIMIT {int(limit)}
+        """
+        for row in store.select(q):
+            results.append({
+                "type": "Commit", "iri": row.get("node"),
+                "title": row.get("title", ""), "sha": row.get("sha"),
+                "date": row.get("date"),
+            })
+
+    if kind in (None, "pr"):
+        pr_f = f'\n      FILTER(?number = {int(pr)})' if pr is not None else ""
+        branch_f = f'\n      FILTER(?baseRef = "{_lit(branch)}")' if branch else ""
+        date_f = ""
+        if since:
+            date_f += f'\n      FILTER(BOUND(?date) && ?date >= "{_lit(_dt(since))}"^^xsd:dateTime)'
+        if until:
+            date_f += f'\n      FILTER(BOUND(?date) && ?date <= "{_lit(_dt(until))}"^^xsd:dateTime)'
+        q = PREFIXES + f"""
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?node ?title ?number ?state ?date ?baseRef WHERE {{
+          ?node a kg:PullRequest ; kg:partOf ?repo .
+          ?repo kg:sourceId "{r}" .
+          OPTIONAL {{ ?node dcterms:title ?title }}
+          OPTIONAL {{ ?node kg:number ?number }}
+          OPTIONAL {{ ?node kg:state ?state }}
+          OPTIONAL {{ ?node kg:mergedAt ?date }}
+          OPTIONAL {{ ?node kg:baseRefName ?baseRef }}{pr_f}{branch_f}{date_f}
+        }} ORDER BY DESC(?number) LIMIT {int(limit)}
+        """
+        for row in store.select(q):
+            num = row.get("number")
+            results.append({
+                "type": "PullRequest", "iri": row.get("node"),
+                "title": row.get("title", ""),
+                "number": int(num) if num is not None else None,
+                "state": row.get("state"), "date": row.get("date"),
+                "base_ref": row.get("baseRef"),
+            })
+
+    results.sort(key=lambda x: x.get("date") or "", reverse=True)
+    results = results[:int(limit)]
+    return {"repo": repo, "backend": store.backend(),
+            "count": len(results), "results": results}
+
+
 def kg_path(store: Store, from_iri: str, to_iri: str, max_len: int = 4) -> dict:
     start, goal = from_iri, to_iri
     seen = {start}

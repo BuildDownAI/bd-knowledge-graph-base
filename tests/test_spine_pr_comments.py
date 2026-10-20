@@ -53,19 +53,30 @@ def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> No
         "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
         "\n"
         "args = sys.argv[1:]\n"
-        "if args[:2] == ['pr', 'list']:\n"
-        "    print(json.dumps([\n"
-        "        {'number': 1, 'title': 'PR 1', 'author': {'login': 'alice'},"
-        " 'state': 'MERGED', 'mergedAt': '2026-01-01T00:00:00Z', 'body': ''},\n"
-        "        {'number': 2, 'title': 'PR 2', 'author': {'login': 'bob'},"
-        " 'state': 'MERGED', 'mergedAt': '2026-01-02T00:00:00Z', 'body': ''},\n"
-        "        {'number': 3, 'title': 'PR 3', 'author': {'login': 'carol'},"
-        " 'state': 'OPEN', 'mergedAt': None, 'body': ''},\n"
-        "    ]))\n"
-        "    sys.exit(0)\n"
+        "# Default branch query: gh api repos/<slug> --jq .default_branch\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
+        "    # PR list fetch (new paginated REST API)\n"
+        "    if re.search(r'/pulls', path):\n"
+        "        print(json.dumps([\n"
+        "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},"
+        " 'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',"
+        " 'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 2, 'title': 'PR 2', 'user': {'login': 'bob'},"
+        " 'state': 'closed', 'merged_at': '2026-01-02T00:00:00Z',"
+        " 'merge_commit_sha': 'bbb222', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 3, 'title': 'PR 3', 'user': {'login': 'carol'},"
+        " 'state': 'open', 'merged_at': None,"
+        " 'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
+        "        ]))\n"
+        "        sys.exit(0)\n"
+        "    # PR comments fetch\n"
         "    m = re.search(r'issues/(\\d+)/comments', path)\n"
         "    if m:\n"
         f"        if int(m.group(1)) == {rate_limit_pr}:\n"
@@ -85,23 +96,79 @@ def _write_fake_gh_clean(fake_dir: Path, call_log: Path) -> None:
     script = fake_dir / "gh"
     script.write_text(
         "#!/usr/bin/env python3\n"
-        "import sys, json\n"
+        "import sys, json, re\n"
         "\n"
         f"call_log = {str(call_log)!r}\n"
         "with open(call_log, 'a') as _f:\n"
         "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
         "\n"
         "args = sys.argv[1:]\n"
-        "if args[:2] == ['pr', 'list']:\n"
-        "    print(json.dumps([\n"
-        "        {'number': 1, 'title': 'PR 1', 'author': {'login': 'alice'},"
-        " 'state': 'MERGED', 'mergedAt': '2026-01-01T00:00:00Z', 'body': ''},\n"
-        "        {'number': 2, 'title': 'PR 2', 'author': {'login': 'bob'},"
-        " 'state': 'MERGED', 'mergedAt': '2026-01-02T00:00:00Z', 'body': ''},\n"
-        "    ]))\n"
-        "    sys.exit(0)\n"
+        "# Default branch query\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
+        "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'/pulls', path):\n"
+        "        print(json.dumps([\n"
+        "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},"
+        " 'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',"
+        " 'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 2, 'title': 'PR 2', 'user': {'login': 'bob'},"
+        " 'state': 'closed', 'merged_at': '2026-01-02T00:00:00Z',"
+        " 'merge_commit_sha': 'bbb222', 'body': '', 'base': {'ref': 'main'}},\n"
+        "        ]))\n"
+        "        sys.exit(0)\n"
+        "    print(json.dumps([]))\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    script.chmod(0o755)
+
+
+def _write_fake_gh_multipage(fake_dir: Path, call_log: Path, total_prs: int = 210) -> None:
+    """Write a fake `gh` that returns `total_prs` PRs split across two JSON arrays (pages)."""
+    page1 = [
+        {"number": i, "title": f"PR {i}", "user": {"login": "user"},
+         "state": "closed", "merged_at": "2026-01-01T00:00:00Z",
+         "merge_commit_sha": f"sha{i:04x}", "body": "", "base": {"ref": "main"}}
+        for i in range(1, 201)
+    ]
+    page2 = [
+        {"number": i, "title": f"PR {i}", "user": {"login": "user"},
+         "state": "closed", "merged_at": "2026-01-02T00:00:00Z",
+         "merge_commit_sha": f"sha{i:04x}", "body": "", "base": {"ref": "main"}}
+        for i in range(201, total_prs + 1)
+    ]
+    script = fake_dir / "gh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json, re\n"
+        "\n"
+        f"call_log = {str(call_log)!r}\n"
+        "with open(call_log, 'a') as _f:\n"
+        "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "\n"
+        "args = sys.argv[1:]\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "if args[:2] == ['api', '--paginate']:\n"
+        "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'/pulls', path):\n"
+        f"        page1 = {json.dumps(page1)}\n"
+        f"        page2 = {json.dumps(page2)}\n"
+        "        print(json.dumps(page1))\n"
+        "        print(json.dumps(page2))\n"
+        "        sys.exit(0)\n"
         "    print(json.dumps([]))\n"
         "    sys.exit(0)\n"
         "\n"
@@ -293,6 +360,86 @@ def test_cli_exits_nonzero(repo: Path) -> None:
     print("PASS: cli.main() exits 1 and prints KG_PR_COMMENTS_INCOMPLETE")
 
 
+def test_pagination(repo: Path) -> None:
+    """A fake gh returning 210 PRs across 2 pages gives prs > 200 and pr_pages_fetched >= 2."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_multipage(fake_dir, call_log, total_prs=210)
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=999)
+
+    assert stats["prs"] > 200, f"Expected prs > 200, got {stats['prs']}"
+    assert stats.get("pr_pages_fetched", 0) >= 2, (
+        f"Expected pr_pages_fetched >= 2, got {stats.get('pr_pages_fetched')}"
+    )
+    print(f"PASS: pagination: prs={stats['prs']}, pr_pages_fetched={stats['pr_pages_fetched']}")
+
+
+def test_dedup_slug(repo: Path) -> None:
+    """sources.yml that lists code_repo slug again under secondary_repos gives one ingest."""
+    import io
+    from kg_ingest import cli as cli_mod
+    import kg_ingest.sources as _sources_mod
+    import kg_ingest.semantic as _semantic_mod
+    import kg_ingest.snapshot as _snapshot_mod
+    import kg_ingest.ontology as _ontology_mod
+    from rdflib import Graph
+
+    code_slug = "test-org/repo"
+    sources_cfg = {
+        "code_repo": {"slug": code_slug},
+        "secondary_repos": [
+            {"slug": code_slug, "path": str(repo)},
+        ],
+    }
+
+    spine_call_slugs: list[str] = []
+
+    def fake_add_spine(g, path, slug, **kw):
+        spine_call_slugs.append(slug)
+        return {"files": 1, "commits": 1, "people": 1,
+                "prs": 0, "pr_comments": 0, "history_branch": "main",
+                "is_default_branch": False}
+
+    buf = io.StringIO()
+    _ai_out = cli_mod.OUT_DIR.parent / "ai-output"
+    _ai_out.mkdir(exist_ok=True)
+
+    with patch.object(_sources_mod, "load", return_value=sources_cfg), \
+         patch.object(_spine_mod, "add_spine", side_effect=fake_add_spine), \
+         patch.object(_semantic_mod, "add_semantic", return_value={}), \
+         patch.object(_ontology_mod, "load", return_value=Graph()), \
+         patch("pyshacl.validate", return_value=(True, None, "")), \
+         patch.object(_snapshot_mod, "write_snapshot", return_value={"part_files": 0}), \
+         patch("sys.stdout", buf):
+        cli_mod.main(argv=["--repo", str(repo), "--secondary", "--max-prs", "0",
+                           "--no-embed"])
+
+    # spine should only be called once for code_repo; secondary duplicate is skipped
+    assert spine_call_slugs.count(code_slug) == 1, (
+        f"Expected add_spine called once for {code_slug!r}, got calls: {spine_call_slugs}"
+    )
+
+    # source-results.json must have a skipped entry for the duplicate
+    results_path = cli_mod.OUT_DIR.parent / "ai-output" / "source-results.json"
+    results = json.loads(results_path.read_text())
+    skipped = [r for r in results if r.get("status") == "skipped"
+               and r.get("source") == f"secondary_repo:{code_slug}"]
+    assert skipped, f"Expected a skipped entry for duplicate slug, got: {results}"
+    assert skipped[0]["reason"].startswith("duplicate of "), (
+        f"Expected reason to start with 'duplicate of ', got: {skipped[0]['reason']!r}"
+    )
+    print(f"PASS: dedup_slug: spine called {len(spine_call_slugs)} time(s), "
+          f"skipped entry reason={skipped[0]['reason']!r}")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -303,6 +450,8 @@ def main() -> None:
         test_cli_exits_nonzero(repo)
         test_help_lists_no_docs_sites()
         test_no_docs_sites_skips_crawl(repo)
+        test_pagination(repo)
+        test_dedup_slug(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 

@@ -100,6 +100,28 @@ def kg_path(from_iri: str, to_iri: str, max_len: int = 4) -> dict:
     return queries.kg_path(store(), from_iri, to_iri, max_len)
 
 
+@mcp.tool()
+def kg_repo_history(repo: str, branch: str | None = None, since: str | None = None,
+                    until: str | None = None, pr: int | None = None,
+                    kind: str | None = None, limit: int = 100) -> dict:
+    """Return commits and/or merged PRs for a repository, with optional filters.
+
+    repo:   owner/name slug of the repository (required)
+    branch: filter commits by the repo's history branch; filter PRs by base branch
+    since:  ISO date lower bound (inclusive) on commit date / PR merge date
+    until:  ISO date upper bound (inclusive) on commit date / PR merge date
+    pr:     return only the PR with this number
+    kind:   "commit", "pr", or omit for both
+    limit:  max results (default 100)
+
+    Returns {repo, count, results} where each result has type, iri, title, and
+    type-specific fields (sha/date for commits; number/state/base_ref for PRs).
+    Read-only.
+    """
+    return queries.kg_repo_history(store(), repo, branch=branch, since=since,
+                                   until=until, pr=pr, kind=kind, limit=limit)
+
+
 def main() -> None:
     # Opt-in streamable-HTTP sidecar mode. When KG_HTTP is set, the server binds
     # HTTP (loopback by default — privacy by placement, for an in-machine proxy

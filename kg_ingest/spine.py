@@ -6,6 +6,7 @@ emitting RDF into the spine named graph. Re-derivable: same repo state -> same t
 from __future__ import annotations
 
 import fnmatch
+from datetime import datetime
 import json
 import re
 import subprocess
@@ -30,6 +31,33 @@ _MAX_PR_COMMENTS = 50
 # Retry delays (seconds) for rate-limited PR comment fetches.
 # Injectable for tests: monkeypatch spine._RETRY_DELAYS = (0, 0, 0).
 _RETRY_DELAYS: tuple[int, ...] = (5, 15, 45)
+
+
+def _parse_paginated_json(text: str) -> tuple[list[dict], int]:
+    """Parse concatenated JSON arrays from `gh api --paginate`; returns (items, page_count).
+
+    gh api --paginate outputs each page's JSON array separately (not combined),
+    so the stdout may be multiple valid JSON arrays concatenated.
+    """
+    result: list[dict] = []
+    pages = 0
+    decoder = json.JSONDecoder()
+    pos = 0
+    text = text.strip()
+    while pos < len(text):
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos >= len(text):
+            break
+        try:
+            obj, new_pos = decoder.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, list):
+            result.extend(obj)
+            pages += 1
+        pos = new_pos
+    return result, pages
 
 
 class PRCommentsIncomplete(Exception):
@@ -162,7 +190,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
               max_commits: int | None = 500, max_prs: int = 60,
               docs_url: str | None = None,
               doc_exclude: list[str] | None = None,
-              pipeline_ver: str = "0.1.0") -> dict:
+              pipeline_ver: str = "0.1.0",
+              history_branch: str | None = None) -> dict:
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
     repo_path = Path(repo_path)
@@ -178,6 +207,32 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
     g.add((repo_iri, DCTERMS.title, Literal(repo_slug)))
     if docs_url:
         g.add((repo_iri, KG.docsUrl, Literal(docs_url)))
+
+    # --- history branch, snapshot ref, default-branch flag ---
+    if not history_branch:
+        try:
+            history_branch = _git(repo_path, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        except Exception:
+            history_branch = "HEAD"
+    try:
+        snapshot_ref = _git(repo_path, "rev-parse", "HEAD").strip()
+    except Exception:
+        snapshot_ref = ""
+    is_default_branch = False
+    try:
+        default_branch = subprocess.run(
+            ["gh", "api", f"repos/{repo_slug}", "--jq", ".default_branch"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        is_default_branch = (history_branch == default_branch)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+    g.add((repo_iri, KG.historyBranch, Literal(history_branch)))
+    g.add((repo_iri, KG.isDefaultBranch, Literal(is_default_branch, datatype=XSD.boolean)))
+    if snapshot_ref:
+        g.add((repo_iri, KG.snapshotRef, Literal(snapshot_ref)))
+    stats["history_branch"] = history_branch
+    stats["is_default_branch"] = is_default_branch
 
     # --- files ---
     for rel in _git(repo_path, "ls-files").splitlines():
@@ -231,8 +286,20 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _link_tracker(g, c, subject, stats)
         people.add(login)
         stats["commits"] += 1
+        # History range for the refresh stats. Author dates carry their own offsets, so compare parsed values.
+        try:
+            when = datetime.fromisoformat(adate)
+        except ValueError:
+            when = None
+        if when is not None:
+            if "_first_commit" not in stats or when < stats["_first_commit"]:
+                stats["_first_commit"] = when
+                stats["first_commit_date"] = adate
+            if "_last_commit" not in stats or when > stats["_last_commit"]:
+                stats["_last_commit"] = when
+                stats["last_commit_date"] = adate
 
-    # --- pull requests (via gh, capped) ---
+    # --- pull requests (via gh REST API, paginated) ---
     if max_prs:
         _pr_run_id = iris.stable_run_id(pipeline_ver, repo_slug + ":pr-comments")
         _pr_run = _pr_comment_run_node(g, _pr_run_id, pipeline_ver)
@@ -240,19 +307,46 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _has_rate_limit_error = False
         try:
             raw = subprocess.run(
-                ["gh", "pr", "list", "--repo", repo_slug, "--state", "all",
-                 "--limit", str(max_prs), "--json",
-                 "number,title,author,state,mergedAt,body"],
+                ["gh", "api", "--paginate",
+                 f"repos/{repo_slug}/pulls?state=all&per_page=100"],
                 capture_output=True, text=True, check=True, cwd=str(repo_path),
             ).stdout
-            for pr in json.loads(raw):
+            all_prs, pr_pages = _parse_paginated_json(raw)
+            stats["prs_total"] = len(all_prs)
+            stats["pr_pages_fetched"] = pr_pages
+            prs_to_ingest = all_prs[:max_prs]
+            omitted = len(all_prs) - len(prs_to_ingest)
+            if omitted > 0:
+                stats["prs_omitted_reason"] = f"capped at {max_prs} (fetched {len(all_prs)} total)"
+
+            for pr in prs_to_ingest:
                 pnode = iris.pr(repo_slug, pr["number"])
                 g.add((pnode, RDF.type, KG.PullRequest))
                 g.add((pnode, KG.number, Literal(pr["number"], datatype=XSD.integer)))
                 g.add((pnode, DCTERMS.title, Literal(pr.get("title") or "")))
-                g.add((pnode, KG.state, Literal(pr.get("state") or "")))
+
+                # REST API: state "open"/"closed"; merged PRs are "closed" with merged_at set
+                merged_at = pr.get("merged_at")
+                if merged_at:
+                    g.add((pnode, KG.state, Literal("merged")))
+                    g.add((pnode, KG.mergedAt, Literal(merged_at, datatype=XSD.dateTime)))
+                else:
+                    g.add((pnode, KG.state, Literal(pr.get("state") or "")))
+
+                # base branch (REST: base.ref)
+                base_ref = (pr.get("base") or {}).get("ref") or ""
+                if base_ref:
+                    g.add((pnode, KG.baseRefName, Literal(base_ref)))
+
+                # link merged PR -> merge commit when that commit is in the graph
+                merge_sha = pr.get("merge_commit_sha")
+                if merge_sha and merged_at:
+                    commit_iri = iris.commit(repo_slug, merge_sha)
+                    if next(g.triples((commit_iri, None, None)), None) is not None:
+                        g.add((pnode, KG.mergeCommit, commit_iri))
+
                 g.add((pnode, KG.partOf, repo_iri))
-                login = (pr.get("author") or {}).get("login") or "unknown"
+                login = (pr.get("user") or {}).get("login") or "unknown"
                 p = iris.person(login)
                 g.add((p, RDF.type, KG.BotAgent if _is_bot(login) else KG.Person))
                 g.add((p, KG.login, Literal(login)))
@@ -271,7 +365,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                              f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
                             capture_output=True, text=True, check=True, cwd=str(repo_path),
                         ).stdout
-                        comments = json.loads(raw_c)[:_MAX_PR_COMMENTS]
+                        comments, _ = _parse_paginated_json(raw_c)
+                        comments = comments[:_MAX_PR_COMMENTS]
                         err_text = None
                         break
                     except (subprocess.CalledProcessError, json.JSONDecodeError,
@@ -296,6 +391,7 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
 
                 _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
 
+            stats["prs_ingested"] = stats["prs"]
             # Format and check error threshold after the PR loop.
             if _pr_errors:
                 stats["pr_comment_errors"] = (
@@ -310,4 +406,6 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
             stats["pr_error"] = str(e)[:200]
 
     stats["people"] = len(people)
+    stats.pop("_first_commit", None)
+    stats.pop("_last_commit", None)
     return stats

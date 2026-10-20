@@ -95,6 +95,16 @@ kg:login        a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:number       a owl:DatatypeProperty ; rdfs:range xsd:integer .
 kg:state        a owl:DatatypeProperty ; rdfs:range xsd:string .
 
+# Repository history metadata (KGB-42)
+kg:historyBranch   a owl:DatatypeProperty ; rdfs:domain kg:Repo ; rdfs:range xsd:string .
+kg:isDefaultBranch a owl:DatatypeProperty ; rdfs:domain kg:Repo ; rdfs:range xsd:boolean .
+kg:snapshotRef     a owl:DatatypeProperty ; rdfs:domain kg:Repo ; rdfs:range xsd:string .
+
+# Pull request extended metadata (KGB-42)
+kg:baseRefName  a owl:DatatypeProperty ; rdfs:domain kg:PullRequest ; rdfs:range xsd:string .
+kg:mergedAt     a owl:DatatypeProperty ; rdfs:domain kg:PullRequest ; rdfs:range xsd:dateTime .
+kg:mergeCommit  a owl:ObjectProperty ; rdfs:domain kg:PullRequest ; rdfs:range kg:Commit .
+
 # Doc-site spine predicates (KGB-4)
 kg:docsUrl          a owl:DatatypeProperty ; rdfs:range xsd:string .  # Repo -> documentation root URL
 kg:rootUrl          a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSite root URL
