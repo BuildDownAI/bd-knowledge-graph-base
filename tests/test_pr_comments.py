@@ -8,7 +8,7 @@ Run: PYTHONPATH=. ./.venv/bin/python tests/test_pr_comments.py
 import subprocess
 
 from rdflib import Graph, Namespace
-from rdflib.namespace import RDF, XSD
+from rdflib.namespace import RDF
 
 from kg_ingest import iris
 from kg_ingest.iris import KG, KGR

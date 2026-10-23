@@ -92,7 +92,6 @@ def _parse_sitemap_xml(content: bytes) -> tuple[list[str], list[str]]:
     def bare(el: ET.Element) -> str:
         return el.tag.split("}")[-1] if "}" in el.tag else el.tag
 
-    root_tag = bare(root)
     for child in root:
         child_tag = bare(child)
         if child_tag == "sitemap":
@@ -127,9 +126,9 @@ def _get_robots(origin: str, config: CrawlConfig, session) -> urllib.robotparser
         if resp.status_code == 200:
             rp.parse(resp.text.splitlines())
         else:
-            rp.allow_all = True
+            rp.allow_all = True  # type: ignore[attr-defined]
     except Exception:
-        rp.allow_all = True
+        rp.allow_all = True  # type: ignore[attr-defined]
     return rp
 
 
@@ -163,7 +162,7 @@ def _extract_links(html_bytes: bytes, base_url: str) -> list[str]:
     soup = BeautifulSoup(html_bytes, "lxml")
     links: list[str] = []
     for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
+        href = str(a["href"]).strip()
         if not href or href.startswith("#") or href.startswith("javascript:"):
             continue
         links.append(_normalize_url(urllib.parse.urljoin(base_url, href)))

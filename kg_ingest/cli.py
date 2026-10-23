@@ -130,8 +130,8 @@ def _ingest_docs_sites(
                 if prior_detail:
                     spine_g.add((page_iri, KG.detail, prior_detail))
                 # Copy DocSection triples (skip re-chunking)
-                for sec_iri, _, _ in prior_g.triples((None, KG.partOf, page_iri)):
-                    for triple in prior_g.triples((sec_iri, None, None)):
+                for prior_sec_iri, _, _ in prior_g.triples((None, KG.partOf, page_iri)):
+                    for triple in prior_g.triples((prior_sec_iri, None, None)):
                         spine_g.add(triple)
                     total_sections += 1
             else:
@@ -678,12 +678,12 @@ def _refresh_stats(duration_sec: float) -> dict:
     largest_file = ""
     largest_bytes = 0
     if SNAP_DIR.exists():
-        for f in SNAP_DIR.rglob("*"):
-            if f.is_file():
-                sz = f.stat().st_size
+        for snap_f in SNAP_DIR.rglob("*"):
+            if snap_f.is_file():
+                sz = snap_f.stat().st_size
                 if sz > largest_bytes:
                     largest_bytes = sz
-                    largest_file = str(f.relative_to(SNAP_DIR))
+                    largest_file = str(snap_f.relative_to(SNAP_DIR))
 
     return {
         "quads": sum(parts.values()),
@@ -767,7 +767,7 @@ def _demo_queries(g: Graph) -> None:
     """
     print("  node counts by type:")
     for row in g.query(q_counts):
-        print(f"     {row.n:>5}  {row.cls.split('#')[-1]}")
+        print(f"     {row.n:>5}  {row.cls.split('#')[-1]}")  # type: ignore[union-attr]
 
     # provenance property-path: learnings reachable to their source doc
     q_prov = kgp + """
@@ -777,7 +777,7 @@ def _demo_queries(g: Graph) -> None:
       }
     """
     for row in g.query(q_prov):
-        print(f"  learnings with a provenance path to a Doc: {row.n}")
+        print(f"  learnings with a provenance path to a Doc: {row.n}")  # type: ignore[union-attr]
 
     # most-used topics (promoted tags)
     q_topics = kgp + """
@@ -785,7 +785,7 @@ def _demo_queries(g: Graph) -> None:
     """
     print("  top topics:")
     for row in g.query(q_topics):
-        print(f"     {row.n:>4}  {row.t.split('/')[-1]}")
+        print(f"     {row.n:>4}  {row.t.split('/')[-1]}")  # type: ignore[union-attr]
 
 
 if __name__ == "__main__":

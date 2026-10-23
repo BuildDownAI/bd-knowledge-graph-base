@@ -12,6 +12,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, XSD, Namespace
@@ -118,8 +119,8 @@ def _git(repo_path: Path, *args: str) -> str:
 
 
 def _is_bot(login: str) -> bool:
-    l = login.lower()
-    return l.endswith("[bot]") or l.endswith("-bot") or "bot]" in l
+    login_lower = login.lower()
+    return login_lower.endswith("[bot]") or login_lower.endswith("-bot") or "bot]" in login_lower
 
 
 def _pr_comment_run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
@@ -167,8 +168,11 @@ def _add_pr_comments(g: Graph, run: URIRef, repo_slug: str, pr_number: int,
 
 
 def _bind(g: Graph) -> None:
-    g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
-    g.bind("dcterms", DCTERMS); g.bind("foaf", FOAF)
+    g.bind("kg", KG)
+    g.bind("kgr", iris.KGR)
+    g.bind("prov", PROV)
+    g.bind("dcterms", DCTERMS)
+    g.bind("foaf", FOAF)
 
 
 def _link_tracker(g: Graph, node: URIRef, text: str, stats: dict) -> None:
@@ -195,8 +199,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
     repo_path = Path(repo_path)
-    stats = {"files": 0, "commits": 0, "people": 0, "prs": 0, "pr_comments": 0,
-             "commit_cap": max_commits, "pr_cap": max_prs}
+    stats: dict[str, Any] = {"files": 0, "commits": 0, "people": 0, "prs": 0, "pr_comments": 0,
+                              "commit_cap": max_commits, "pr_cap": max_prs}
     people: set[str] = set()
 
     # --- repo node ---

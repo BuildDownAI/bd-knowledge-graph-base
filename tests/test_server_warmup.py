@@ -12,11 +12,10 @@ import subprocess
 import sys
 import threading
 import time
-import unittest.mock
 import urllib.error
 import urllib.request
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------

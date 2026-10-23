@@ -76,8 +76,6 @@ async def _ingest_fixture(server):
 @pytest.mark.network
 def test_lazy_import() -> None:
     """Importing kg_ingest.mcp_source must not import mcp at module level."""
-    import importlib
-
     for key in list(sys.modules):
         if key.startswith("kg_ingest.mcp_source"):
             del sys.modules[key]
@@ -223,9 +221,6 @@ def test_rdf_emission() -> None:
     assert doc_sections, "no kg:DocSection nodes emitted"
 
     # multi-heading resources (guide, reference) must each produce >=1 DocSection
-    from kg_ingest.iris import KGR
-    from rdflib import Literal, URIRef
-    from rdflib.namespace import DCTERMS
     for page_iri in doc_pages:
         url_vals = list(spine_g.objects(page_iri, KG.url))
         if not url_vals:

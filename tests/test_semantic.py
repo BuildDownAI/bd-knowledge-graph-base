@@ -2,7 +2,8 @@
 ranks the dedup learning first. Also the missing-sidecar path.
 Gated on fastembed. Run: PYTHONPATH=. ./.venv/bin/python tests/test_semantic.py
 """
-import os, tempfile
+import os
+import tempfile
 from pathlib import Path
 
 try:
@@ -101,7 +102,8 @@ def main():
     test_resolve_npz_kg_npz_wins()
     test_missing_sidecar()
     if not HAVE:
-        print("SKIP: fastembed not installed — build/query path not exercised"); return
+        print("SKIP: fastembed not installed — build/query path not exercised")
+        return
     test_ranks_dedup_first()
     print("\nall semantic tests passed")
 

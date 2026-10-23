@@ -10,7 +10,7 @@ import urllib.parse
 
 import pytest
 
-from kg_ingest.docsite import CrawlConfig, Page, Section, crawl_site, _parse_sitemap_xml
+from kg_ingest.docsite import CrawlConfig, Page, crawl_site, _parse_sitemap_xml
 
 # ---------------------------------------------------------------------------
 # Fixture HTML pages served by the local test server
@@ -57,10 +57,11 @@ _API = b"""<html><head><title>API Reference</title></head>
 <aside>Aside sidebar content Gamma</aside>
 </body></html>"""
 
-_SIMPLE = lambda title: (
-    f"<html><head><title>{title}</title></head>"
-    f"<body><h1>{title}</h1><p>{title} content.</p></body></html>"
-).encode()
+def _SIMPLE(title: str) -> bytes:
+    return (
+        f"<html><head><title>{title}</title></head>"
+        f"<body><h1>{title}</h1><p>{title} content.</p></body></html>"
+    ).encode()
 
 _ROBOTS = b"User-agent: *\nDisallow: /private/\n"
 
@@ -473,7 +474,6 @@ def test_sphinx_headerlink_stripped(base_url: str) -> None:
 
 def test_lazy_import() -> None:
     """Importing kg_ingest.docsite must not import bs4 at module level."""
-    import importlib
     import sys
 
     # Remove any cached import so we test the module's own top-level behaviour

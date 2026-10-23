@@ -4,7 +4,7 @@ on its FIRST line (not merely present somewhere in the body).
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_classify.py
 """
 from kg_ingest.tracker import _classify, _classify_pr_comment, _comment_title, _add_issue, _run_node
-from rdflib import Graph, Literal, URIRef
+from rdflib import Graph
 from rdflib.namespace import RDF
 from kg_ingest import iris
 from kg_ingest.tracker import KG, PROV, DCTERMS, _bind
@@ -19,7 +19,8 @@ def check(name: str, got, want) -> None:
 
 def _make_graphs():
     spine_g, run_g = Graph(), Graph()
-    _bind(spine_g); _bind(run_g)
+    _bind(spine_g)
+    _bind(run_g)
     return spine_g, run_g
 
 

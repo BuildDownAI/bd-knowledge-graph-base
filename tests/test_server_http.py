@@ -154,7 +154,7 @@ def test_server_http() -> None:
             })
             assert status == 200, f"Expected HTTP 200 for tools/call, got {status}: {call_result}"
             assert "result" in call_result, f"Expected result key in response, got: {call_result}"
-            print(f"  kg_search OK")
+            print("  kg_search OK")
 
             print("\nALL HTTP SMOKE CHECKS PASSED")
         finally:

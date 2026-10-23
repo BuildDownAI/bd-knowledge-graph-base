@@ -39,8 +39,8 @@ class RdflibStore(Store):
         rows = []
         for row in self._g.query(sparql):
             d = {}
-            for var in row.labels:
-                val = row[var]
+            for var in row.labels:  # type: ignore[union-attr]
+                val = row[var]  # type: ignore[index]
                 if val is not None:
                     d[str(var)] = str(val)
             rows.append(d)
@@ -101,8 +101,8 @@ class NtPartsStore(Store):
         rows = []
         for row in self._g.query(sparql):
             d = {}
-            for var in row.labels:
-                val = row[var]
+            for var in row.labels:  # type: ignore[union-attr]
+                val = row[var]  # type: ignore[index]
                 if val is not None:
                     d[str(var)] = str(val)
             rows.append(d)
@@ -134,11 +134,11 @@ class StardogStore(Store):
 
 
 def _trig_path_from_env() -> Path | str:
-    trig = os.environ.get("KG_TRIG")
-    if trig is None:
-        data_dir = os.environ.get("KG_DATA_DIR")
-        trig = Path(data_dir) / "graph.trig" if data_dir else DEFAULT_TRIG
-    return trig
+    trig_env = os.environ.get("KG_TRIG")
+    if trig_env is not None:
+        return trig_env
+    data_dir = os.environ.get("KG_DATA_DIR")
+    return Path(data_dir) / "graph.trig" if data_dir else DEFAULT_TRIG
 
 
 def get_store() -> Store:

@@ -26,7 +26,6 @@ import sys
 from pathlib import Path
 
 from rdflib import Dataset
-from rdflib.namespace import DCTERMS
 
 ROOT = Path(__file__).resolve().parent.parent
 SNAP_DIR = ROOT / "snapshot"

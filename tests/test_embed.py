@@ -39,7 +39,8 @@ FIXTURE = FIXTURE_RAW.replace(_DNS, _NS).replace("STAMP_PLACEHOLDER", STAMP)
 
 def main():
     if not HAVE:
-        print("SKIP: fastembed not installed"); return
+        print("SKIP: fastembed not installed")
+        return
     d = tempfile.mkdtemp()
     snap = os.path.join(d, "snapshot")
     trig = os.path.join(d, "g.trig")
@@ -82,7 +83,8 @@ def main():
 def test_no_snapshot_dir_writes_to_out_dir_not_snap_dir():
     """build_embeddings(store, out_dir=tmp) must not touch the repo snapshot/."""
     if not HAVE:
-        print("SKIP: fastembed not installed"); return
+        print("SKIP: fastembed not installed")
+        return
     import hashlib
     from kg_ingest.embed import SNAP_DIR
 
