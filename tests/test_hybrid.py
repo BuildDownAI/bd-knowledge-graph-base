@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 try:
-    import fastembed  # noqa: F401
+    import fastembed  # noqa: F401  # presence-check import; result captured in HAVE flag above
     HAVE = True
 except ImportError:
     HAVE = False

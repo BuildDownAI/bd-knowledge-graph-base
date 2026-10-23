@@ -11,7 +11,7 @@ import sys
 import pytest
 
 try:
-    import mcp  # noqa: F401
+    import mcp  # noqa: F401  # presence-check import; result captured in HAVE_MCP flag above
     HAVE_MCP = True
 except ImportError:
     HAVE_MCP = False

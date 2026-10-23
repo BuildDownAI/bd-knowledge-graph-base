@@ -767,7 +767,7 @@ def _demo_queries(g: Graph) -> None:
     """
     print("  node counts by type:")
     for row in g.query(q_counts):
-        print(f"     {row.n:>5}  {row.cls.split('#')[-1]}")  # type: ignore[union-attr]
+        print(f"     {row.n:>5}  {row.cls.split('#')[-1]}")  # type: ignore[union-attr]  # rdflib types SELECT rows as ResultRow | None; SELECT always yields ResultRow
 
     # provenance property-path: learnings reachable to their source doc
     q_prov = kgp + """
@@ -777,7 +777,7 @@ def _demo_queries(g: Graph) -> None:
       }
     """
     for row in g.query(q_prov):
-        print(f"  learnings with a provenance path to a Doc: {row.n}")  # type: ignore[union-attr]
+        print(f"  learnings with a provenance path to a Doc: {row.n}")  # type: ignore[union-attr]  # rdflib types SELECT rows as ResultRow | None; SELECT always yields ResultRow
 
     # most-used topics (promoted tags)
     q_topics = kgp + """
@@ -785,7 +785,7 @@ def _demo_queries(g: Graph) -> None:
     """
     print("  top topics:")
     for row in g.query(q_topics):
-        print(f"     {row.n:>4}  {row.t.split('/')[-1]}")  # type: ignore[union-attr]
+        print(f"     {row.n:>4}  {row.t.split('/')[-1]}")  # type: ignore[union-attr]  # rdflib types SELECT rows as ResultRow | None; SELECT always yields ResultRow
 
 
 if __name__ == "__main__":

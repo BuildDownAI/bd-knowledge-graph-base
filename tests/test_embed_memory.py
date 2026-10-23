@@ -36,7 +36,7 @@ class _FakeTextEmbedding:
 
 
 _fastembed_mod = types.ModuleType("fastembed")
-_fastembed_mod.TextEmbedding = _FakeTextEmbedding  # type: ignore[attr-defined]
+_fastembed_mod.TextEmbedding = _FakeTextEmbedding  # type: ignore[attr-defined]  # patching a dynamic module attribute at test setup time
 
 
 def _fake_store(n_quads: int = 21_000):

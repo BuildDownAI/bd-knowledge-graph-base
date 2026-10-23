@@ -116,7 +116,7 @@ def _get_response(url: str, config: CrawlConfig, session):
             last_exc = exc
             if attempt < config.retries - 1:
                 time.sleep(2 ** attempt)
-    raise last_exc  # type: ignore[misc]
+    raise last_exc  # type: ignore[misc]  # mypy can't prove last_exc is non-None; loop always runs ≥ 1 iteration so last_exc is always set
 
 
 def _get_robots(origin: str, config: CrawlConfig, session) -> urllib.robotparser.RobotFileParser:
@@ -126,9 +126,9 @@ def _get_robots(origin: str, config: CrawlConfig, session) -> urllib.robotparser
         if resp.status_code == 200:
             rp.parse(resp.text.splitlines())
         else:
-            rp.allow_all = True  # type: ignore[attr-defined]
+            rp.allow_all = True  # type: ignore[attr-defined]  # allow_all exists at runtime but is absent from typeshed stubs
     except Exception:
-        rp.allow_all = True  # type: ignore[attr-defined]
+        rp.allow_all = True  # type: ignore[attr-defined]  # allow_all exists at runtime but is absent from typeshed stubs
     return rp
 
 

@@ -39,8 +39,8 @@ class RdflibStore(Store):
         rows = []
         for row in self._g.query(sparql):
             d = {}
-            for var in row.labels:  # type: ignore[union-attr]
-                val = row[var]  # type: ignore[index]
+            for var in row.labels:  # type: ignore[union-attr]  # rdflib types SELECT rows as ResultRow | None; SELECT always yields ResultRow
+                val = row[var]  # type: ignore[index]  # ResultRow supports Variable-key indexing but typeshed stubs don't model it
                 if val is not None:
                     d[str(var)] = str(val)
             rows.append(d)
@@ -101,8 +101,8 @@ class NtPartsStore(Store):
         rows = []
         for row in self._g.query(sparql):
             d = {}
-            for var in row.labels:  # type: ignore[union-attr]
-                val = row[var]  # type: ignore[index]
+            for var in row.labels:  # type: ignore[union-attr]  # rdflib types SELECT rows as ResultRow | None; SELECT always yields ResultRow
+                val = row[var]  # type: ignore[index]  # ResultRow supports Variable-key indexing but typeshed stubs don't model it
                 if val is not None:
                     d[str(var)] = str(val)
             rows.append(d)
