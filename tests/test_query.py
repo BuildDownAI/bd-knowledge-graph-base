@@ -70,7 +70,7 @@ FIXTURE = f"""
 """
 
 
-def main():
+def test_query():
     d = tempfile.mkdtemp()
     p = Path(d, "g.trig")
     p.write_text(FIXTURE)
@@ -144,4 +144,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_query()

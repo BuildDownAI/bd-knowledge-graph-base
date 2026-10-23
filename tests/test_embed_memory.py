@@ -63,7 +63,7 @@ def _synthetic_cards(n: int):
     ]
 
 
-def main():
+def test_embed_memory():
     # The virtual-memory cap is best-effort: macOS refuses to lower RLIMIT_AS
     # (ValueError), so the cap is enforced only where the platform allows it —
     # in practice the Linux CI legs. The functional batching assertions below
@@ -95,4 +95,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_embed_memory()

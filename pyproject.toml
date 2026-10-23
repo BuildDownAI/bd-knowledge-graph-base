@@ -26,3 +26,10 @@ build-backend = "hatchling.build"
 # package must run from a checkout, not a site-packages copy.
 [tool.hatch.build.targets.wheel]
 packages = ["kg_ingest", "kg_query"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "network: requires network access or a local port (skipped without KG_TEST_NETWORK=1)",
+]
