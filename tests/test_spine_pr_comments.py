@@ -18,7 +18,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 # Patch retry delays to zero before any spine call so tests run instantly.
+import kg_ingest.snapshot as _snapshot_mod
 import kg_ingest.spine as _spine_mod
 _spine_mod._RETRY_DELAYS = (0, 0, 0)
 
@@ -190,6 +193,11 @@ def _with_fake_gh(fake_dir: Path):
     return _Ctx()
 
 
+@pytest.fixture
+def repo(tmp_path):
+    return _make_fixture_repo(tmp_path)
+
+
 def check(name: str, got, want) -> None:
     assert got == want, f"FAIL {name}: got {got!r}, want {want!r}"
     print(f"PASS: {name}")
@@ -346,7 +354,8 @@ def test_cli_exits_nonzero(repo: Path) -> None:
     }
     fake_exc = PRCommentsIncomplete(fake_stats)
 
-    with patch.object(_spine_mod, "add_spine", side_effect=fake_exc):
+    with patch.object(_spine_mod, "add_spine", side_effect=fake_exc), \
+         patch.object(_snapshot_mod, "write_snapshot", return_value={"part_files": 0}):
         buf = io.StringIO()
         with patch("sys.stdout", buf):
             ret = cli_mod.main(argv=["--repo", str(repo), "--max-prs", "3"])

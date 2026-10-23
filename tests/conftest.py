@@ -40,6 +40,17 @@ def _snapshot_guard():
     )
 
 
+@pytest.fixture(autouse=True)
+def _reset_semantic_caches():
+    import kg_query.semantic
+    import kg_query.server
+    kg_query.semantic._index = None
+    kg_query.server._store = None
+    yield
+    kg_query.semantic._index = None
+    kg_query.server._store = None
+
+
 @pytest.fixture
 def snapshot_sources_backup():
     """Back up snapshot/ and sources.yml before a test; restore after."""
