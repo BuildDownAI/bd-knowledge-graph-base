@@ -2,9 +2,9 @@ name: Test Suite
 
 on:
   push:
-    branches: [main, testing]
+    branches: [main, testing, "ai-implement/feature/**", "ai-implement/multi-issue/**"]
   pull_request:
-    branches: [main, testing]
+    branches: [main, testing, "ai-implement/feature/**", "ai-implement/multi-issue/**"]
 
 jobs:
   test:
