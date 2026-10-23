@@ -105,7 +105,7 @@ def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path | None =
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    np.savez(out_dir / "embeddings.npz", **arrays)  # type: ignore[call-overload]
+    np.savez(out_dir / "embeddings.npz", **arrays)  # type: ignore[call-overload,arg-type]  # numpy stubs don't model **kwargs arrays
     (out_dir / "embeddings.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     if snapshot_dir is None:
@@ -114,7 +114,7 @@ def build_embeddings(store, out_dir: Path = OUT_DIR, snapshot_dir: Path | None =
     # Compressed committed snapshot — consumers copy this instead of re-running inference.
     # String columns (snippets) compress especially well; ~2.5 MB vs 12 MB uncompressed.
     snapshot_dir.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(snapshot_dir / "embeddings.npz", **arrays)  # type: ignore[call-overload]
+    np.savez_compressed(snapshot_dir / "embeddings.npz", **arrays)  # type: ignore[call-overload,arg-type]  # numpy stubs don't model **kwargs arrays
     (snapshot_dir / "embeddings.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     return meta

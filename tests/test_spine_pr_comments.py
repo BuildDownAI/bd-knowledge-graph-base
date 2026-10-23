@@ -13,7 +13,6 @@ import io
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -25,8 +24,8 @@ import kg_ingest.snapshot as _snapshot_mod
 import kg_ingest.spine as _spine_mod
 _spine_mod._RETRY_DELAYS = (0, 0, 0)
 
-from kg_ingest import iris
-from kg_ingest.spine import PRCommentsIncomplete, add_spine
+from kg_ingest import iris  # noqa: E402 -- must follow the module-level retry-delay patch above
+from kg_ingest.spine import PRCommentsIncomplete, add_spine  # noqa: E402 -- same
 
 
 def _make_fixture_repo(tmp: Path) -> Path:
@@ -305,7 +304,6 @@ def test_no_docs_sites_skips_crawl(repo: Path) -> None:
     import kg_ingest.snapshot as _snapshot_mod
     import kg_ingest.ontology as _ontology_mod
     from rdflib import Graph
-    import pyshacl
 
     sources_cfg = {
         "code_repo": {"slug": "test-org/repo"},

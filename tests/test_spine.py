@@ -42,7 +42,6 @@ def _make_fixture_repo(tmp: Path) -> Path:
 
 def _doc_paths(g: Graph, slug: str) -> set[str]:
     """Return the kg:path values of all kg:Doc nodes for this repo slug."""
-    from rdflib import Literal
     paths = set()
     for node in g.subjects(RDF.type, KG.Doc):
         for _, _, p in g.triples((node, KG.path, None)):
@@ -93,9 +92,9 @@ def test_spine_doc_exclude() -> None:
 
         # --- Test 3: doc_exclude=None is equivalent to no doc_exclude ---
         g3 = Graph()
-        stats3 = add_spine(g3, repo, slug,
-                           max_commits=None, max_prs=0,
-                           doc_exclude=None)
+        add_spine(g3, repo, slug,
+                  max_commits=None, max_prs=0,
+                  doc_exclude=None)
         assert _doc_paths(g3, slug) == {"a.md", "sub/b.md", "latest/c.mdx"}, \
             "doc_exclude=None should behave identically to omitting it"
         print("[PASS] doc_exclude=None: same as omitted")

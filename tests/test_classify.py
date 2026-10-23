@@ -7,7 +7,7 @@ from kg_ingest.tracker import _classify, _classify_pr_comment, _comment_title, _
 from rdflib import Graph
 from rdflib.namespace import RDF
 from kg_ingest import iris
-from kg_ingest.tracker import KG, PROV, DCTERMS, _bind
+from kg_ingest.tracker import KG, PROV, _bind
 
 BODY_LONG = "x " * 250  # ~500 chars, comfortably over _DECISION_MIN_CHARS (400)
 

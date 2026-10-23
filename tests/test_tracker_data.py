@@ -210,12 +210,12 @@ def test_add_tracker():
     with contextlib.redirect_stdout(_narrow_out):
         _narrow_stats = add_tracker(Graph(), Graph(), "test/repo", "test-run-narrow",
                                     pipeline_ver="0.1.0", issues_override=FIXTURE_ISSUES)
-    _narrow_lines = [l for l in _narrow_out.getvalue().splitlines() if "missing from" in l]
+    _narrow_lines = [line for line in _narrow_out.getvalue().splitlines() if "missing from" in line]
     check("narrow record: stats name the missing fields",
           _narrow_stats["missing_fields"], ["branchName", "labels", "parent", "project", "relations"])
     check("narrow record: one log line per missing field", len(_narrow_lines), 5)
     check("narrow record: log line carries the record count",
-          any("branchName' missing from 2/2" in l for l in _narrow_lines), True)
+          any("branchName' missing from 2/2" in line for line in _narrow_lines), True)
 
     # ----- KGA-8: --repos-root path resolution -----
     _entry = {"slug": "BuildDownAI/docs", "path": "../docs"}
@@ -231,7 +231,7 @@ def test_tracker_data_jira():
         jira_issues = json.load(f)
 
     iss100 = iris.tracker_issue("AII-100")
-    iss101 = iris.tracker_issue("AII-101")
+    iris.tracker_issue("AII-101")
 
     _jira_spine = Graph()
     _jira_run = Graph()
@@ -290,9 +290,9 @@ def test_tracker_data_jira():
     def _normalize_nt(g: Graph) -> list[str]:
         from kg_ingest.iris import NAMESPACE as _NS
         raw = g.serialize(format="nt")
-        lines = sorted(l for l in raw.splitlines() if l.strip())
+        lines = sorted(line for line in raw.splitlines() if line.strip())
         if _NS != _GOLDEN_NS:
-            lines = [l.replace(_NS, _GOLDEN_NS) for l in lines]
+            lines = [line.replace(_NS, _GOLDEN_NS) for line in lines]
         return lines
 
     with open(REPO_ROOT / "tests" / "fixtures" / "tracker-data.json", encoding="utf-8") as f:
@@ -305,14 +305,14 @@ def test_tracker_data_jira():
     _actual_nt = _normalize_nt(_golden_spine + _golden_run)
 
     # Under pytest, --write-golden is never in sys.argv; the comparison always runs.
-    _golden_nt = [l for l in _GOLDEN_LINEAR_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    _golden_nt = [line for line in _GOLDEN_LINEAR_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
     _added_nt = sorted(set(_actual_nt) - set(_golden_nt))
     _removed_nt = sorted(set(_golden_nt) - set(_actual_nt))
     if _added_nt or _removed_nt:
-        for l in _removed_nt:
-            print(f"- {l}")
-        for l in _added_nt:
-            print(f"+ {l}")
+        for line in _removed_nt:
+            print(f"- {line}")
+        for line in _added_nt:
+            print(f"+ {line}")
     check("linear golden: sorted N-Triples match the pinned file",
           _actual_nt == _golden_nt, True)
 
@@ -363,7 +363,7 @@ def test_refresh_subcommand(snapshot_sources_backup):
         f"STDERR: {result.stderr[-1000:]}"
     )
 
-    stdout_lines = [l for l in result.stdout.splitlines() if l.strip()]
+    stdout_lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert stdout_lines, "FAIL: refresh produced no stdout"
     last_line = stdout_lines[-1]
     try:
