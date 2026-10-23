@@ -11,7 +11,6 @@ import difflib
 import json
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,7 +61,7 @@ code_repo:
 self_ingest: false
 secondary_repos:
   - slug: test-org/sec-missing
-    path: ../nonexistent-missing-dir-kgb45
+    path: /nonexistent-missing-dir-kgb45
 trackers: []
 """
 

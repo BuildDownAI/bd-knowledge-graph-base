@@ -29,9 +29,10 @@ Every entry in the list has exactly these keys:
 
 ## AI-Implement reads these files
 
-AI-Implement (`parseSourceResults` in `src/kg-source-results.ts`) reads the
-same schema. A field rename or status-value change in `kg_ingest/cli.py` must
-be reflected here **and** in the corresponding AI-Implement issue (AII-1528).
+AI-Implement copies these fixture files into its own test suite and parses them
+via `parseSourceResults` in `src/kg-source-results.ts`. A field rename or
+status-value change in `kg_ingest/cli.py` must be reflected here **and** in the
+corresponding AI-Implement issue (AII-1528).
 
 ## Updating
 
