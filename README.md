@@ -164,6 +164,22 @@ the path that runs on them:
 Materialize prints its peak RSS on every run; when a refresh dies with a bare
 "Command failed" and the host log shows an OOM kill, that line is the number to size against.
 
+## Running the tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Network-dependent tests (HTTP server smoke, docsite crawler, MCP source) are skipped by
+default. To run them:
+
+```bash
+KG_TEST_NETWORK=1 pytest
+```
+
+Run a single file: `pytest tests/test_query.py -v`
+
 ## Improving the base — the learnings loop
 
 Operating a KG teaches you things the base should absorb (ingest failure

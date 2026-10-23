@@ -17,219 +17,224 @@ def check(name: str, got, want) -> None:
     print(f"PASS: {name}")
 
 
-# 1. Marker on the first line -> learning (both phases, with/without leading '#')
-check("first-line marker (#, up)",
-      _classify("# ai-implement-build-up-learnings\n\nFeature: foo\n" + BODY_LONG),
-      "learning")
-check("first-line marker (no #, down)",
-      _classify("ai-implement-build-down-learnings\nbody text " + BODY_LONG),
-      "learning")
-
-# 2. Marker only DEEPER in the body -> NOT a learning (the over-catch we're fixing).
-#    Long enough -> decision; short -> dropped (None).
-check("marker deeper + long -> decision (not learning)",
-      _classify("AI Planning: Cross-Story Context\n\nSee the "
-                "ai-implement-build-up-learnings comment elsewhere. " + BODY_LONG),
-      "decision")
-check("marker deeper + short -> None",
-      _classify("Quick note.\nmentions ai-implement-build-down-learnings once."),
-      None)
-
-# 3. Long human rationale, no marker -> decision
-check("long rationale, no marker -> decision", _classify(BODY_LONG), "decision")
-
-# 4. Short comment, no marker -> None
-check("short, no marker -> None", _classify("lgtm, merging"), None)
-
-# 5. _comment_title still yields the phase title for a first-line-marker learning
-title = _comment_title("PROJ-259", "Dispatch dedup has no TTL",
-                       "# ai-implement-build-up-learnings\n\nFeature: TTL", "learning")
-check("title uses phase form",
-      title, "PROJ-259 build-up learnings — Dispatch dedup has no TTL")
-
-print("\nall classify tests passed")
-
-# ---- _classify_pr_comment tests ----
-
-# kg-refresh learnings marker -> learning
-check("pr: kg-refresh marker -> learning",
-      _classify_pr_comment(
-          "# ai-implement-kg-refresh-learnings\n**Refresh:** 2026-09-01\n## What happened\nX",
-          "ai-implement[bot]"),
-      "learning")
-
-# Smoke-jumper report heading -> verification
-check("pr: smoke-jumper heading -> verification",
-      _classify_pr_comment("## \U0001f525 Smoke-Jumper Report\n\nAll clear.", "smoke-jumper[bot]"),
-      "verification")
-
-# claude-review-verdict marker -> verification
-check("pr: claude-review-verdict marker -> verification",
-      _classify_pr_comment("<!-- claude-review-verdict pass -->\nLGTM.", "reviewer"),
-      "verification")
-
-# ai-implement post-push marker -> verification
-check("pr: ai-implement post-push marker -> verification",
-      _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "reviewer"),
-      "verification")
-
-# Bot author >=400 chars -> None (bots can't be decision)
-check("pr: bot [bot] >=400 -> None",
-      _classify_pr_comment(BODY_LONG, "gh-actions[bot]"),
-      None)
-check("pr: orchestrator-bot >=400 -> None",
-      _classify_pr_comment(BODY_LONG, "ai-implement-orchestrator-bot"),
-      None)
-
-# Human >=400 chars -> decision
-check("pr: human >=400 -> decision",
-      _classify_pr_comment(BODY_LONG, "alice"),
-      "decision")
-
-# Short comment, no marker -> None
-check("pr: short -> None",
-      _classify_pr_comment("lgtm", "alice"),
-      None)
-
-print("\nall _classify_pr_comment tests passed")
-
-# ---- _classify: new KGB-16 cases ----
-
-# Smoke-jumper heading on an issue comment -> verification
-check("issue: smoke-jumper heading -> verification",
-      _classify("## \U0001f525 Smoke-Jumper Report\n\nAll clear."),
-      "verification")
-
-# AI Planning: first line with headings kwarg -> planning_note
-check("issue: AI Planning: first line -> planning_note",
-      _classify("AI Planning: Sprint scope\n" + "x " * 250,
-                headings=("AI Planning:",)),
-      "planning_note")
-
-# AI Planning: first line WITHOUT headings kwarg -> decision (old callers unchanged)
-check("issue: AI Planning: first line, no headings -> decision",
-      _classify("AI Planning: Sprint scope\n" + "x " * 250),
-      "decision")
-
-# is_bot=True suppresses Decision
-check("issue: bot author >=400 -> None",
-      _classify(BODY_LONG, is_bot=True),
-      None)
-
-# Verification heading takes precedence over bot=True
-check("issue: smoke-jumper + bot=True -> verification",
-      _classify("## \U0001f525 Smoke-Jumper Report\nAll clear.", is_bot=True),
-      "verification")
-
-# ---- _classify_pr_comment: status=start exclusion (KGB-7 residual) ----
-
-check("pr: status=start -> None (not verification)",
-      _classify_pr_comment(
-          "<!-- ai-implement post-push status=start -->\nRunning post-implementation review…",
-          "ai-implement[bot]"),
-      None)
-
-# A valid post-push marker (no status=start) still classifies as verification
-check("pr: post-push no status=start -> verification",
-      _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "ai-implement[bot]"),
-      "verification")
-
-# ---- _add_issue round-trip: AI Planning: comment -> kg:PlanningNote ----
-
 def _make_graphs():
     spine_g, run_g = Graph(), Graph()
     _bind(spine_g); _bind(run_g)
     return spine_g, run_g
 
-_planning_body = "AI Planning: Sprint scope\n" + "x " * 250  # 500+ chars
 
-spine_g, run_g = _make_graphs()
-run = _run_node(run_g, "test-run-1", "0.0.0-test")
-_add_issue(spine_g, run_g, run, "TEST",
-           {"identifier": "TEST-1", "title": "Test issue",
-            "comments": {"nodes": [{"body": _planning_body, "user": {"name": "orchestrator"}}]},
-            "labels": {"nodes": []}, "relations": {"nodes": []}},
-           {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
-            "comment_planning_notes": 0, "comment_verifications": 0,
-            "comment_implementation_notes": 0},
-           headings=("AI Planning:",))
+# ---- _classify tests ----
 
-cnode = iris.comment("TEST-1", 0)
-types_in_run_g = set(run_g.objects(cnode, RDF.type))
-check("add_issue: AI Planning: -> kg:PlanningNote in run_g",
-      KG.PlanningNote in types_in_run_g,
-      True)
-check("add_issue: AI Planning: -> provenance wasDerivedFrom",
-      (cnode, PROV.wasDerivedFrom, iris.tracker_issue("TEST-1")) in run_g,
-      True)
-check("add_issue: AI Planning: -> provenance wasGeneratedBy",
-      len(list(run_g.objects(cnode, PROV.wasGeneratedBy))) >= 1,
-      True)
+def test_classify_first_line_markers():
+    # 1. Marker on the first line -> learning (both phases, with/without leading '#')
+    check("first-line marker (#, up)",
+          _classify("# ai-implement-build-up-learnings\n\nFeature: foo\n" + BODY_LONG),
+          "learning")
+    check("first-line marker (no #, down)",
+          _classify("ai-implement-build-down-learnings\nbody text " + BODY_LONG),
+          "learning")
 
-print("\nall KGB-16 tests passed")
+    # 2. Marker only DEEPER in the body -> NOT a learning
+    check("marker deeper + long -> decision (not learning)",
+          _classify("AI Planning: Cross-Story Context\n\nSee the "
+                    "ai-implement-build-up-learnings comment elsewhere. " + BODY_LONG),
+          "decision")
+    check("marker deeper + short -> None",
+          _classify("Quick note.\nmentions ai-implement-build-down-learnings once."),
+          None)
+
+    # 3. Long human rationale, no marker -> decision
+    check("long rationale, no marker -> decision", _classify(BODY_LONG), "decision")
+
+    # 4. Short comment, no marker -> None
+    check("short, no marker -> None", _classify("lgtm, merging"), None)
+
+
+def test_comment_title_phase_form():
+    # 5. _comment_title still yields the phase title for a first-line-marker learning
+    title = _comment_title("PROJ-259", "Dispatch dedup has no TTL",
+                           "# ai-implement-build-up-learnings\n\nFeature: TTL", "learning")
+    check("title uses phase form",
+          title, "PROJ-259 build-up learnings — Dispatch dedup has no TTL")
+
+
+# ---- _classify_pr_comment tests ----
+
+def test_classify_pr_comment():
+    # kg-refresh learnings marker -> learning
+    check("pr: kg-refresh marker -> learning",
+          _classify_pr_comment(
+              "# ai-implement-kg-refresh-learnings\n**Refresh:** 2026-09-01\n## What happened\nX",
+              "ai-implement[bot]"),
+          "learning")
+
+    # Smoke-jumper report heading -> verification
+    check("pr: smoke-jumper heading -> verification",
+          _classify_pr_comment("## \U0001f525 Smoke-Jumper Report\n\nAll clear.", "smoke-jumper[bot]"),
+          "verification")
+
+    # claude-review-verdict marker -> verification
+    check("pr: claude-review-verdict marker -> verification",
+          _classify_pr_comment("<!-- claude-review-verdict pass -->\nLGTM.", "reviewer"),
+          "verification")
+
+    # ai-implement post-push marker -> verification
+    check("pr: ai-implement post-push marker -> verification",
+          _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "reviewer"),
+          "verification")
+
+    # Bot author >=400 chars -> None (bots can't be decision)
+    check("pr: bot [bot] >=400 -> None",
+          _classify_pr_comment(BODY_LONG, "gh-actions[bot]"),
+          None)
+    check("pr: orchestrator-bot >=400 -> None",
+          _classify_pr_comment(BODY_LONG, "ai-implement-orchestrator-bot"),
+          None)
+
+    # Human >=400 chars -> decision
+    check("pr: human >=400 -> decision",
+          _classify_pr_comment(BODY_LONG, "alice"),
+          "decision")
+
+    # Short comment, no marker -> None
+    check("pr: short -> None",
+          _classify_pr_comment("lgtm", "alice"),
+          None)
+
+    # status=start exclusion (KGB-7 residual)
+    check("pr: status=start -> None (not verification)",
+          _classify_pr_comment(
+              "<!-- ai-implement post-push status=start -->\nRunning post-implementation review…",
+              "ai-implement[bot]"),
+          None)
+
+    # A valid post-push marker (no status=start) still classifies as verification
+    check("pr: post-push no status=start -> verification",
+          _classify_pr_comment("<!-- ai-implement post-push -->\nPushed fix.", "ai-implement[bot]"),
+          "verification")
+
+
+# ---- _classify: KGB-16 cases ----
+
+def test_classify_kgb16():
+    # Smoke-jumper heading on an issue comment -> verification
+    check("issue: smoke-jumper heading -> verification",
+          _classify("## \U0001f525 Smoke-Jumper Report\n\nAll clear."),
+          "verification")
+
+    # AI Planning: first line with headings kwarg -> planning_note
+    check("issue: AI Planning: first line -> planning_note",
+          _classify("AI Planning: Sprint scope\n" + "x " * 250,
+                    headings=("AI Planning:",)),
+          "planning_note")
+
+    # AI Planning: first line WITHOUT headings kwarg -> decision (old callers unchanged)
+    check("issue: AI Planning: first line, no headings -> decision",
+          _classify("AI Planning: Sprint scope\n" + "x " * 250),
+          "decision")
+
+    # is_bot=True suppresses Decision
+    check("issue: bot author >=400 -> None",
+          _classify(BODY_LONG, is_bot=True),
+          None)
+
+    # Verification heading takes precedence over bot=True
+    check("issue: smoke-jumper + bot=True -> verification",
+          _classify("## \U0001f525 Smoke-Jumper Report\nAll clear.", is_bot=True),
+          "verification")
+
+
+def test_add_issue_planning_note():
+    # _add_issue round-trip: AI Planning: comment -> kg:PlanningNote
+    _planning_body = "AI Planning: Sprint scope\n" + "x " * 250  # 500+ chars
+
+    spine_g, run_g = _make_graphs()
+    run = _run_node(run_g, "test-run-1", "0.0.0-test")
+    _add_issue(spine_g, run_g, run, "TEST",
+               {"identifier": "TEST-1", "title": "Test issue",
+                "comments": {"nodes": [{"body": _planning_body, "user": {"name": "orchestrator"}}]},
+                "labels": {"nodes": []}, "relations": {"nodes": []}},
+               {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+                "comment_planning_notes": 0, "comment_verifications": 0,
+                "comment_implementation_notes": 0},
+               headings=("AI Planning:",))
+
+    cnode = iris.comment("TEST-1", 0)
+    types_in_run_g = set(run_g.objects(cnode, RDF.type))
+    check("add_issue: AI Planning: -> kg:PlanningNote in run_g",
+          KG.PlanningNote in types_in_run_g,
+          True)
+    check("add_issue: AI Planning: -> provenance wasDerivedFrom",
+          (cnode, PROV.wasDerivedFrom, iris.tracker_issue("TEST-1")) in run_g,
+          True)
+    check("add_issue: AI Planning: -> provenance wasGeneratedBy",
+          len(list(run_g.objects(cnode, PROV.wasGeneratedBy))) >= 1,
+          True)
+
 
 # ---- _classify: KGB-24 ImplementationNote cases ----
 
-# Bot implementation summary via _first_line ("## KEY Implementation Summary")
-check("bot: implementation summary -> implementation_note",
-      _classify("## BDS-47 Implementation Summary\n\nFixed the rail.", is_bot=True),
-      "implementation_note")
+def test_classify_kgb24():
+    # Bot implementation summary via _first_line ("## KEY Implementation Summary")
+    check("bot: implementation summary -> implementation_note",
+          _classify("## BDS-47 Implementation Summary\n\nFixed the rail.", is_bot=True),
+          "implementation_note")
 
-# Bot implementation summary via "## Summary" + "## Approach" heading
-check("bot: ## Summary + ## Approach -> implementation_note",
-      _classify("## Summary\n\nWe changed the loader.\n\n## Approach\n\nReplace X with Y.",
-                is_bot=True),
-      "implementation_note")
+    # Bot implementation summary via "## Summary" + "## Approach" heading
+    check("bot: ## Summary + ## Approach -> implementation_note",
+          _classify("## Summary\n\nWe changed the loader.\n\n## Approach\n\nReplace X with Y.",
+                    is_bot=True),
+          "implementation_note")
 
-# Bot implementation summary via "## Summary" + "## Test plan" heading
-check("bot: ## Summary + ## Test plan -> implementation_note",
-      _classify("## Summary\n\nAdded caching.\n\n## Test plan\n\n- Run tests.", is_bot=True),
-      "implementation_note")
+    # Bot implementation summary via "## Summary" + "## Test plan" heading
+    check("bot: ## Summary + ## Test plan -> implementation_note",
+          _classify("## Summary\n\nAdded caching.\n\n## Test plan\n\n- Run tests.", is_bot=True),
+          "implementation_note")
 
-# Bot "Implementation failed" note -> None (does not match "Implementation Summary")
-check('bot: "Implementation failed" -> None',
-      _classify("## Implementation failed\n\nBuild error on line 42.", is_bot=True),
-      None)
+    # Bot "Implementation failed" note -> None (does not match "Implementation Summary")
+    check('bot: "Implementation failed" -> None',
+          _classify("## Implementation failed\n\nBuild error on line 42.", is_bot=True),
+          None)
 
-# Human >=400-char comment -> decision (unchanged)
-check("human >=400 -> decision",
-      _classify(BODY_LONG, is_bot=False),
-      "decision")
+    # Human >=400-char comment -> decision (unchanged)
+    check("human >=400 -> decision",
+          _classify(BODY_LONG, is_bot=False),
+          "decision")
 
-# _comment_title for implementation_note
-impl_title = _comment_title("BDS-47", "Some issue title",
-                            "## BDS-47 Implementation Summary\n\nFixed the rail.",
-                            "implementation_note")
-check("comment_title: implementation_note -> '<ident> implementation summary'",
-      impl_title, "BDS-47 implementation summary")
+    # _comment_title for implementation_note
+    impl_title = _comment_title("BDS-47", "Some issue title",
+                                "## BDS-47 Implementation Summary\n\nFixed the rail.",
+                                "implementation_note")
+    check("comment_title: implementation_note -> '<ident> implementation summary'",
+          impl_title, "BDS-47 implementation summary")
 
-# _add_issue round-trip: implementation summary -> kg:ImplementationNote
-_impl_body = "## BDS-47 Implementation Summary\n\nFixed the rail ingest path."
 
-spine_g2, run_g2 = _make_graphs()
-run2 = _run_node(run_g2, "test-run-impl", "0.0.0-test")
-stats2 = {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
-          "comment_planning_notes": 0, "comment_verifications": 0,
-          "comment_implementation_notes": 0}
-_add_issue(spine_g2, run_g2, run2, "TEST",
-           {"identifier": "BDS-47", "title": "Rail issue",
-            "comments": {"nodes": [{"body": _impl_body,
-                                    "user": {"name": "ai-implement-bot"}}]},
-            "labels": {"nodes": []}, "relations": {"nodes": []}},
-           stats2,
-           headings=("AI Planning:",),
-           bot_users={"ai-implement-bot"})
+def test_add_issue_implementation_note():
+    # _add_issue round-trip: implementation summary -> kg:ImplementationNote
+    _impl_body = "## BDS-47 Implementation Summary\n\nFixed the rail ingest path."
 
-cnode2 = iris.comment("BDS-47", 0)
-types_in_run_g2 = set(run_g2.objects(cnode2, RDF.type))
-check("add_issue: impl summary -> kg:ImplementationNote in run_g",
-      KG.ImplementationNote in types_in_run_g2,
-      True)
-check("add_issue: impl summary -> provenance wasDerivedFrom",
-      (cnode2, PROV.wasDerivedFrom, iris.tracker_issue("BDS-47")) in run_g2,
-      True)
-check("add_issue: impl summary -> comment_implementation_notes stat",
-      stats2["comment_implementation_notes"],
-      1)
+    spine_g2, run_g2 = _make_graphs()
+    run2 = _run_node(run_g2, "test-run-impl", "0.0.0-test")
+    stats2 = {"issues": 0, "comment_learnings": 0, "comment_decisions": 0,
+              "comment_planning_notes": 0, "comment_verifications": 0,
+              "comment_implementation_notes": 0}
+    _add_issue(spine_g2, run_g2, run2, "TEST",
+               {"identifier": "BDS-47", "title": "Rail issue",
+                "comments": {"nodes": [{"body": _impl_body,
+                                        "user": {"name": "ai-implement-bot"}}]},
+                "labels": {"nodes": []}, "relations": {"nodes": []}},
+               stats2,
+               headings=("AI Planning:",),
+               bot_users={"ai-implement-bot"})
 
-print("\nall KGB-24 tests passed")
+    cnode2 = iris.comment("BDS-47", 0)
+    types_in_run_g2 = set(run_g2.objects(cnode2, RDF.type))
+    check("add_issue: impl summary -> kg:ImplementationNote in run_g",
+          KG.ImplementationNote in types_in_run_g2,
+          True)
+    check("add_issue: impl summary -> provenance wasDerivedFrom",
+          (cnode2, PROV.wasDerivedFrom, iris.tracker_issue("BDS-47")) in run_g2,
+          True)
+    check("add_issue: impl summary -> comment_implementation_notes stat",
+          stats2["comment_implementation_notes"],
+          1)

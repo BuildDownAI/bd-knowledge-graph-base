@@ -33,7 +33,7 @@ FIXTURE_RAW = """
 """
 FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
-def main():
+def test_cards():
     with tempfile.NamedTemporaryFile("w", suffix=".trig", delete=False) as f:
         f.write(FIXTURE); path = f.name
     try:
@@ -75,4 +75,4 @@ def main():
     print(f"PASS: build_cards -> {len(cards)} cards {types}")
 
 if __name__ == "__main__":
-    main()
+    test_cards()

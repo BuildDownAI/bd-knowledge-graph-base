@@ -11,6 +11,7 @@ must round-trip write_parts() with no loss.
 """
 import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -37,7 +38,12 @@ def _fixture_union() -> Graph:
 
 def test_fastembed_not_imported():
     """Importing kg_ingest.materialize must not pull in fastembed."""
-    assert "fastembed" not in sys.modules, (
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, kg_ingest.materialize; sys.exit('fastembed' in sys.modules)"],
+        cwd=str(Path(__file__).parent.parent),
+    )
+    assert result.returncode == 0, (
         "fastembed was imported as a side-effect of importing kg_ingest.materialize"
     )
     print("test_fastembed_not_imported: OK")

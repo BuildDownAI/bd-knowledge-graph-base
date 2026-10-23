@@ -36,7 +36,7 @@ jobs:
           key: fastembed-${{ hashFiles('requirements.txt') }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
       - name: Inject custom namespace into sources.yml
         if: matrix.inject_namespace
@@ -46,14 +46,6 @@ jobs:
             || { echo "ERROR: namespace injection was a no-op — sources.yml format may have changed"; exit 1; }
 
       - name: Run test suite
-        run: |
-          FAILED=0
-          for f in tests/test_*.py; do
-            echo "=== $f ==="
-            PYTHONPATH=. python "$f" || FAILED=$((FAILED + 1))
-          done
-          if [ "$FAILED" -gt 0 ]; then
-            echo "FAILED: $FAILED test file(s) failed"
-            exit 1
-          fi
-          echo "ALL TESTS PASSED"
+        env:
+          KG_TEST_NETWORK: "1"
+        run: pytest -ra

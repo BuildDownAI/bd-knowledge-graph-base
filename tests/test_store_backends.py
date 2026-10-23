@@ -6,6 +6,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import pytest
+
 from kg_query import queries
 from kg_query.store import OxigraphStore, RdflibStore
 from kg_ingest.iris import NAMESPACE as NS
@@ -87,23 +89,16 @@ def _median_latency_ms(store, term: str = "webhook", runs: int = 10) -> float:
     return statistics.median(lats)
 
 
-# ── Assertion harness ─────────────────────────────────────────────────────────
-GAPS: list[str] = []
+def test_store_backends() -> None:
+    pytest.importorskip("pyoxigraph",
+                        reason="pyoxigraph not installed — pip install -r requirements-oxigraph.txt")
 
+    gaps: list[str] = []
 
-def _assert(condition: bool, msg: str) -> None:
-    if not condition:
-        GAPS.append(msg)
-        print(f"  GAP: {msg}")
-
-
-def main() -> None:
-    try:
-        import pyoxigraph  # noqa: F401
-    except ImportError:
-        print("pyoxigraph not installed — install with: pip install -r requirements-oxigraph.txt")
-        print("Skipping OxigraphStore tests.")
-        raise SystemExit(0)
+    def _assert(condition: bool, msg: str) -> None:
+        if not condition:
+            gaps.append(msg)
+            print(f"  GAP: {msg}")
 
     print("=== Backend parity + benchmark: RdflibStore vs OxigraphStore ===\n")
 
@@ -199,14 +194,12 @@ def main() -> None:
     print(f"  10×     | rdflib        | {rd10_load*1000:10.1f} | {rd10_lat:10.2f} | {rd10_mem:13}")
     print(f"  10×     | oxigraph      | {ox10_load*1000:10.1f} | {ox10_lat:10.2f} | {ox10_mem:13}")
 
-    if GAPS:
-        print(f"\nGAPS ({len(GAPS)}):")
-        for g in GAPS:
-            print(f"  - {g}")
-        raise SystemExit(1)
+    if gaps:
+        gaps_text = "\n".join(f"  - {g}" for g in gaps)
+        pytest.fail(f"Backend parity GAPS ({len(gaps)}):\n{gaps_text}")
     else:
         print("\nALL BACKEND PARITY CHECKS PASSED")
 
 
 if __name__ == "__main__":
-    main()
+    test_store_backends()

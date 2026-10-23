@@ -58,7 +58,7 @@ def check(name: str, got, want) -> None:
     print(f"PASS: {name}")
 
 
-def main():
+def test_pr_comments():
     g = Graph()
     g.bind("kg", KG)
     g.bind("kgr", KGR)
@@ -121,4 +121,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_pr_comments()

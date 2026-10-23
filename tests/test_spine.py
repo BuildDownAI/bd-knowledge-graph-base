@@ -58,7 +58,7 @@ def _file_paths(g: Graph) -> set[str]:
     return paths
 
 
-def main() -> None:
+def test_spine_doc_exclude() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         repo = _make_fixture_repo(tmp)
@@ -104,4 +104,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_spine_doc_exclude()
