@@ -33,3 +33,13 @@ pythonpath = ["."]
 markers = [
     "network: requires network access or a local port (skipped without KG_TEST_NETWORK=1)",
 ]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+ignore_missing_imports = true
+files = ["kg_ingest", "kg_query"]

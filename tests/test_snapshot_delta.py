@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import Graph, URIRef
 from rdflib.namespace import RDF
 
 from kg_ingest.snapshot import write_parts, write_snapshot
@@ -34,7 +34,8 @@ _TRACKER_DATA = _FIXTURES / "tracker-data.json"
 _SLUG = "test-org/fixture"
 _TEAM = "TEST"
 _HEADINGS = ("AI Planning:",)
-_TO_GOLDEN_KEY = lambda t: f"{t}.nt"
+def _TO_GOLDEN_KEY(t):
+    return f"{t}.nt"
 
 
 def _make_fixture_repo(tmp: Path) -> Path:
@@ -199,7 +200,7 @@ def test_write_snapshot_fails_on_oversized_parts_file() -> None:
             except SystemExit as exc:
                 msg = str(exc)
                 # Find the line(s) that mention a parts/ file.
-                parts_lines = [l for l in msg.splitlines() if "parts/" in l]
+                parts_lines = [line for line in msg.splitlines() if "parts/" in line]
                 assert parts_lines, f"exit message must name a parts/ file; got: {msg!r}"
                 parts_line = " ".join(parts_lines)
                 assert "MB" in parts_line.upper(), (

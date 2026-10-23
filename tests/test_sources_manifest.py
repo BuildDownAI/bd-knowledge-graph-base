@@ -2,7 +2,6 @@
 
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_sources_manifest.py
 """
-import sys
 from pathlib import Path
 
 import pytest

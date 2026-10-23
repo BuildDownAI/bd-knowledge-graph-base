@@ -90,7 +90,7 @@ def write_parts(union: Graph, parts_dir: Path, _cap: int = _PART_SIZE_CAP) -> di
 
     written: dict[str, int] = {}
     for t, g in by_type.items():
-        all_lines = sorted(l for l in g.serialize(format="nt").splitlines() if l.strip())
+        all_lines = sorted(line for line in g.serialize(format="nt").splitlines() if line.strip())
         content = "\n".join(all_lines) + "\n"
 
         if len(content.encode("utf-8")) <= _cap:

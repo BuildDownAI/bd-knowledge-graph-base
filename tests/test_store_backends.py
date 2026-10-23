@@ -187,8 +187,8 @@ def test_store_backends() -> None:
     # ── Final summary ─────────────────────────────────────────────────────────
     print("\n=== Numbers summary ===")
     print("  (RSS delta via /proc/self/status — includes Rust/RocksDB native heap)")
-    print(f"  Corpus  | Backend       |  Load (ms) | Query (ms) | RSS delta (KB)")
-    print(f"  --------+---------------+------------+------------+---------------")
+    print("  Corpus  | Backend       |  Load (ms) | Query (ms) | RSS delta (KB)")
+    print("  --------+---------------+------------+------------+---------------")
     print(f"  1×      | rdflib        | {rd1_load*1000:10.1f} | {rd1_lat:10.2f} | {rd1_mem:13}")
     print(f"  1×      | oxigraph      | {ox1_load*1000:10.1f} | {ox1_lat:10.2f} | {ox1_mem:13}")
     print(f"  10×     | rdflib        | {rd10_load*1000:10.1f} | {rd10_lat:10.2f} | {rd10_mem:13}")

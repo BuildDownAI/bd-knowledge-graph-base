@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from kg_ingest.guard import Verdict, count_parts_dir, evaluate
+from kg_ingest.guard import count_parts_dir, evaluate
 
 
 def check(name: str, got, want) -> None:

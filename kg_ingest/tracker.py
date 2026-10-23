@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from typing import Any
 
 import requests
 from rdflib import Graph, Literal, URIRef
@@ -95,8 +96,11 @@ query($team: String!, $after: String) {
 
 
 def _bind(g: Graph) -> None:
-    g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
-    g.bind("dcterms", DCTERMS); g.bind("skos", SKOS)
+    g.bind("kg", KG)
+    g.bind("kgr", iris.KGR)
+    g.bind("prov", PROV)
+    g.bind("dcterms", DCTERMS)
+    g.bind("skos", SKOS)
 
 
 def _run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
@@ -181,7 +185,7 @@ def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str |
     # comments that merely mention it (keeps _classify aligned with _comment_title).
     # Use the raw first line (not _first_line) so the marker is detected even when
     # _first_line skips it (a one-word heading like `# ai-implement-build-up-learnings`).
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if any(m in raw_first_lower for m in _LEARNING_MARKERS):
         return "learning"
@@ -219,7 +223,7 @@ def _classify_pr_comment(body: str, author_login: str) -> str | None:
     """
     # Use raw first line for learning-marker detection so the marker is found even
     # when _first_line would skip it (e.g. `# ai-implement-kg-refresh-learnings`).
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if any(m in raw_first_lower for m in _LEARNING_MARKERS):
         return "learning"
@@ -248,7 +252,7 @@ def _comment_title(ident: str, issue_title: str, body: str, kind: str) -> str:
     Verification comments with an HTML orchestrator marker get "<ident> review: <first
     substantive line>" so the title is never just the HTML comment itself.
     """
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if kind == "learning" and any(m in raw_first_lower for m in _LEARNING_MARKERS):
         phase = ("build-down learnings" if "build-down" in raw_first_lower
@@ -331,8 +335,8 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
     stats["issues"] += 1
 
     # ---- comments -> semantic layer (Learning / Decision / PlanningNote / Verification) ----
-    label_tags = [l["name"].lower() for l in (iss.get("labels") or {}).get("nodes", [])
-                  if l.get("name") and l["name"].lower() not in _LIFECYCLE_LABELS]
+    label_tags = [lbl["name"].lower() for lbl in (iss.get("labels") or {}).get("nodes", [])
+                  if lbl.get("name") and lbl["name"].lower() not in _LIFECYCLE_LABELS]
     _bot_users = bot_users or set()
     # comments may be a plain list (pipeline shape) or {"nodes": [...]} (GraphQL shape)
     _comments_raw = iss.get("comments") or []
@@ -401,9 +405,10 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
                 "(the graph would otherwise be silently empty). `source .env` first.")
     else:
         api_key = None
-    _bind(spine_g); _bind(run_g)
+    _bind(spine_g)
+    _bind(run_g)
     run = _run_node(run_g, run_id, pipeline_ver)
-    stats = {"teams": [], "issues": 0, "comment_learnings": 0,
+    stats: dict[str, Any] = {"teams": [], "issues": 0, "comment_learnings": 0,
              "comment_decisions": 0, "comment_planning_notes": 0,
              "comment_verifications": 0, "comment_implementation_notes": 0}
     cfg_data = cfg or sources.load()
@@ -436,6 +441,7 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
                       f"{missing_counts[name]}/{len(issues_override)} tracker-data records")
         stats["missing_fields"] = sorted(missing_counts)
     else:
+        assert api_key is not None  # set in the issues_override is None branch above
         for entry in sources.trackers(cfg_data):
             if entry.get("kind") != "linear":
                 continue

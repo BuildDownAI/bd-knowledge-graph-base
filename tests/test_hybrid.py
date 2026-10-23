@@ -2,11 +2,12 @@
 to lexical-only when the vector index is missing. Vector arm gated on fastembed.
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_hybrid.py
 """
-import os, tempfile
+import os
+import tempfile
 from pathlib import Path
 
 try:
-    import fastembed  # noqa: F401
+    import fastembed  # noqa: F401  # presence-check import; result captured in HAVE flag above
     HAVE = True
 except ImportError:
     HAVE = False
@@ -172,7 +173,8 @@ def main():
     test_degraded_lexical_only()
     test_lexical_only_hit_has_type()
     if not HAVE:
-        print("SKIP: fastembed not installed — vector arm not exercised"); return
+        print("SKIP: fastembed not installed — vector arm not exercised")
+        return
     test_paraphrase_via_semantic()
     test_exact_id_boost()
     test_partial_id_no_false_boost()

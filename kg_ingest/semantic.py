@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import frontmatter
 from rdflib import Graph, Literal, URIRef
-from rdflib.namespace import RDF, RDFS, SKOS, XSD, Namespace
+from rdflib.namespace import RDF, SKOS, XSD, Namespace
 
 from . import iris, normalize
 
@@ -23,8 +24,11 @@ DCTERMS = Namespace("http://purl.org/dc/terms/")
 
 
 def _bind(g: Graph) -> None:
-    g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
-    g.bind("dcterms", DCTERMS); g.bind("skos", SKOS)
+    g.bind("kg", KG)
+    g.bind("kgr", iris.KGR)
+    g.bind("prov", PROV)
+    g.bind("dcterms", DCTERMS)
+    g.bind("skos", SKOS)
 
 
 def _topic(g: Graph, tag: str) -> URIRef:
@@ -55,8 +59,8 @@ def add_semantic(g: Graph, repo_path: Path, repo_slug: str, run_id: str,
     _bind(g)
     repo_path = Path(repo_path)
     run = _run_node(g, run_id, pipeline_ver, model, prompt_hash, notes)
-    stats = {"solutions": 0, "decisions": 0, "plans": 0,
-             "topics": set(), "issues": 0}
+    stats: dict[str, Any] = {"solutions": 0, "decisions": 0, "plans": 0,
+                             "topics": set(), "issues": 0}
 
     # ---------- docs/solutions/ : structured frontmatter ----------
     sol_dir = repo_path / "docs" / "solutions"
