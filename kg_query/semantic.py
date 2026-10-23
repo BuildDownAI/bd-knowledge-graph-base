@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 NPZ = Path(__file__).resolve().parent.parent / "out" / "embeddings.npz"
 
 _index = None  # lazy singleton
+_index_lock: threading.Lock = threading.Lock()
 
 
 def resolve_npz() -> Path:
@@ -48,7 +50,9 @@ class _Index:
 def _load(npz_path: Path):
     global _index
     if _index is None:
-        _index = _Index(npz_path)
+        with _index_lock:
+            if _index is None:
+                _index = _Index(npz_path)
     return _index
 
 

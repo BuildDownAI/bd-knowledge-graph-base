@@ -23,7 +23,7 @@ a `knowledge-graph-<your-project>` repo in minutes.
   reciprocal rank fusion — robust to exact IDs *and* paraphrases.
 - **A read-only MCP server** exposing `kg_hybrid_search` (preferred),
   `kg_search`, `kg_semantic_search`, `kg_neighbors`, `kg_provenance`, `kg_path`
-  (HTTP mode is stateless by design — the orchestrator proxies each call as a single POST with no session).
+  (HTTP mode is stateless by design — the orchestrator proxies each call as a single POST with no session; in HTTP mode the server loads the graph and embeddings index in the background at start so the first tool call does not pay the cold-load cost).
 - **Git-diffable snapshots**: the binary graph stays untracked; a compact
   `snapshot/` digest + per-type parts make data changes reviewable in git.
 

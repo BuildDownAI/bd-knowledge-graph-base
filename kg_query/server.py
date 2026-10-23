@@ -14,6 +14,8 @@ Data path:    KG_DATA_DIR sets the default directory for both the graph (graph.t
 from __future__ import annotations
 
 import os
+import sys
+import threading
 
 from mcp.server.fastmcp import FastMCP
 
@@ -23,13 +25,31 @@ from .store import Store, get_store
 mcp = FastMCP(os.environ.get("KG_SERVER_NAME", "kg"))
 
 _store: Store | None = None
+_store_lock: threading.Lock = threading.Lock()
 
 
 def store() -> Store:
     global _store
     if _store is None:
-        _store = get_store()
+        with _store_lock:
+            if _store is None:
+                _store = get_store()
     return _store
+
+
+def _warmup() -> None:
+    """Load the store and embeddings index in the background at HTTP start."""
+    try:
+        store()
+    except Exception as exc:
+        print(f"kg-query warm-up: store load failed: {exc}", file=sys.stderr)
+        return
+    npz = semantic.resolve_npz()
+    if npz.exists():
+        try:
+            semantic._load(npz)
+        except Exception as exc:
+            print(f"kg-query warm-up: embeddings load failed: {exc}", file=sys.stderr)
 
 
 @mcp.tool()
@@ -141,6 +161,7 @@ def main() -> None:
         # lower bound; the upper bound is the last version this was tested on.
         mcp.settings.stateless_http = True
         mcp.settings.json_response = True
+        threading.Thread(target=_warmup, daemon=True, name="kg-warmup").start()
         mcp.run(transport="streamable-http")
     else:
         mcp.run()  # stdio transport (default)
