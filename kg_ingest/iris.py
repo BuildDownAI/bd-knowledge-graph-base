@@ -83,6 +83,16 @@ def pr_comment(repo_slug: str, pr_number: int | str, comment_id: int | str) -> U
     return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/comment/{comment_id}")
 
 
+def pr_review_comment(repo_slug: str, pr_number: int | str, comment_id: int | str) -> URIRef:
+    # Separate path segment from issue-comment IDs — GitHub's inline review comment
+    # IDs live in a different integer space but could overlap numerically.
+    return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/review-comment/{comment_id}")
+
+
+def pr_review_body(repo_slug: str, pr_number: int | str, review_id: int | str) -> URIRef:
+    return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/review-body/{review_id}")
+
+
 def project(name: str) -> URIRef:
     return URIRef(f"{KGR}project/{_seg(name)}")
 

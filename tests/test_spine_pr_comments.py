@@ -62,9 +62,21 @@ def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> No
         "        print('main')\n"
         "        sys.exit(0)\n"
         "\n"
+        "# GraphQL: return empty thread list\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    # PR list fetch (new paginated REST API)\n"
+        "    # Inline review comments and review bodies — check before generic /pulls\n"
+        "    if re.search(r'pulls/\\d+/comments', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'pulls/\\d+/reviews', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    # PR list fetch\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
         "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},"
@@ -78,7 +90,7 @@ def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> No
         " 'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
         "        ]))\n"
         "        sys.exit(0)\n"
-        "    # PR comments fetch\n"
+        "    # Conversation comments fetch\n"
         "    m = re.search(r'issues/(\\d+)/comments', path)\n"
         "    if m:\n"
         f"        if int(m.group(1)) == {rate_limit_pr}:\n"
@@ -112,8 +124,18 @@ def _write_fake_gh_clean(fake_dir: Path, call_log: Path) -> None:
         "        print('main')\n"
         "        sys.exit(0)\n"
         "\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'pulls/\\d+/comments', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'pulls/\\d+/reviews', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
         "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},"
@@ -163,8 +185,18 @@ def _write_fake_gh_multipage(fake_dir: Path, call_log: Path, total_prs: int = 21
         "        print('main')\n"
         "        sys.exit(0)\n"
         "\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'pulls/\\d+/comments', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'pulls/\\d+/reviews', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         f"        page1 = {json.dumps(page1)}\n"
         f"        page2 = {json.dumps(page2)}\n"
@@ -447,6 +479,89 @@ def test_dedup_slug(repo: Path) -> None:
           f"skipped entry reason={skipped[0]['reason']!r}")
 
 
+def test_review_fetch_error_counts_toward_incomplete(repo: Path) -> None:
+    """A fetch error on pulls/{n}/comments counts toward KG_PR_COMMENTS_INCOMPLETE."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    if '.default_branch' in args:\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    # Inline review comments: always fail with rate-limit error\n"
+            "    if re.search(r'pulls/\\d+/comments', path):\n"
+            "        print('API rate limit exceeded.', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    if re.search(r'pulls/\\d+/reviews', path):\n"
+            "        print(json.dumps([]))\n"
+            "        sys.exit(0)\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        print(json.dumps([\n"
+            "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
+            "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "             'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
+            "        ]))\n"
+            "        sys.exit(0)\n"
+            "    m = re.search(r'issues/(\\d+)/comments', path)\n"
+            "    if m:\n"
+            "        print(json.dumps([]))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            exc_caught = None
+            try:
+                add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+
+    assert exc_caught is not None, (
+        "Expected PRCommentsIncomplete when inline review comments fetch rate-limits"
+    )
+    stats = exc_caught.stats
+    assert "pr_comment_errors" in stats, (
+        f"Expected pr_comment_errors in stats: {stats}"
+    )
+    print(f"PASS: review fetch error counted toward incomplete: "
+          f"pr_comment_errors={stats['pr_comment_errors']!r}")
+
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "snapshot/"],
+        capture_output=True, text=True,
+    )
+    assert result.stdout.strip() == "", (
+        f"snapshot/ has unexpected changes after failed ingest:\n{result.stdout}"
+    )
+    print("PASS: snapshot/ unchanged after PRCommentsIncomplete")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -459,6 +574,7 @@ def main() -> None:
         test_no_docs_sites_skips_crawl(repo)
         test_pagination(repo)
         test_dedup_slug(repo)
+        test_review_fetch_error_counts_toward_incomplete(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 

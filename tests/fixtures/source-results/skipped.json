@@ -10,6 +10,7 @@
       "people": 1,
       "prs": 0,
       "pr_comments": 0,
+      "pr_review_items": 0,
       "commit_cap": 5,
       "pr_cap": 0,
       "history_branch": "main",

@@ -163,3 +163,15 @@ kg:ofNode      a owl:ObjectProperty ; rdfs:domain kg:Chunk .
 kg:ordinal     a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:integer .
 kg:text        a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:confidence  a owl:DatatypeProperty ; rdfs:range xsd:decimal .  # RDF-star annotation on extracted edges
+
+# PR review content properties (KGB-47) — used on kg:Verification nodes for inline
+# review comments and review bodies from pulls/{n}/comments and pulls/{n}/reviews.
+kg:reviewerLogin       a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:reviewerKind        a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:severity            a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:reviewFilePath      a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:reviewLine          a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:integer .
+kg:commitId            a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:originalCommitId    a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:threadState         a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
+kg:reviewState         a owl:DatatypeProperty ; rdfs:domain kg:Verification ; rdfs:range xsd:string .
