@@ -122,8 +122,6 @@ def test_pr_comments():
     print("\nall pr_comments tests passed")
 
 
-PROV2 = Namespace("http://www.w3.org/ns/prov#")
-DCTERMS2 = Namespace("http://purl.org/dc/terms/")
 REVIEW_REPO = "owner/test-repo"
 REVIEW_PR = 112
 
@@ -192,7 +190,7 @@ def test_codex_inline_and_receipt():
     check("inline commitId", (inode, KG.commitId, Literal("abc123def456")) in g, True)
     check("inline threadState resolved", (inode, KG.threadState, Literal("resolved")) in g, True)
     check("inline about pnode", (inode, KG.about, pnode) in g, True)
-    check("inline wasDerivedFrom pnode", (inode, PROV2.wasDerivedFrom, pnode) in g, True)
+    check("inline wasDerivedFrom pnode", (inode, PROV.wasDerivedFrom, pnode) in g, True)
 
     rnode = iris.pr_review_body(REVIEW_REPO, REVIEW_PR, 200001)
     check("receipt IRI suffix", str(rnode).endswith(

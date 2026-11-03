@@ -171,8 +171,10 @@ Thread states are read from GraphQL `pullRequest.reviewThreads`. If the call fai
 the thread cannot be matched, the state is recorded as `unknown` — never as `open` or
 `resolved`. Possible values: `resolved`, `outdated`, `open`, `unknown`.
 
-**Cap**: each PR's review content is capped at `_MAX_PR_REVIEW_ITEMS = 100` items
-(separate from `_MAX_PR_COMMENTS`). A log line is printed when the cap fires.
+**Cap**: inline review comments are capped at `_MAX_PR_REVIEW_ITEMS = 100` items
+and review bodies are capped at `_MAX_PR_REVIEW_ITEMS = 100` items (each limit
+applied separately, each separate from `_MAX_PR_COMMENTS`), so the maximum per PR
+is 200 items combined. A log line is printed when either cap fires.
 
 ---
 
