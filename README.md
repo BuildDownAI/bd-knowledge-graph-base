@@ -96,6 +96,7 @@ Repos listed more than once across `code_repo`, `secondary_repos`, and `self_ing
 
 ```
 sources.yml            # THE source manifest (edit this first; includes namespace)
+                       # Set KG_NAMESPACE env var to override namespace: in sources.yml.
 ontology/              # kg.ttl (classes/predicates) + shapes.ttl (SHACL provenance invariant)
 kg_ingest/             # spine + semantic + tracker ingesters, embeddings, snapshot writer
 kg_query/              # store seam (rdflib|Stardog), read tools, hybrid search, MCP server
