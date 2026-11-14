@@ -9,7 +9,7 @@ from collections import deque
 
 from kg_ingest.iris import KG as _KG, NAMESPACE
 
-from .store import Store
+from .store import Store, StardogStore, StardogRunStore
 
 PREFIXES = f"""
 PREFIX kg: <{_KG}>
@@ -246,7 +246,24 @@ def kg_repo_history(store: Store, repo: str, branch: str | None = None,
             "count": len(results), "results": results}
 
 
+def _stardog_path(store: Store, from_iri: str, to_iri: str, max_len: int) -> dict:
+    """kg_path as one Stardog path query (shortest path over all edges, both directions)
+    instead of one kg_neighbors query per node visited. Same result shape.
+    Written by Michael Grove (Stardog) in PR 85 on BuildDownAI/knowledge-graph-ai-implement."""
+    q = f"""
+    PATHS START ?x = {_iri(from_iri)} END ?y = {_iri(to_iri)}
+    VIA {{ {{ ?x ?p ?y BIND("out" AS ?dir) }} UNION {{ ?y ?p ?x BIND("in" AS ?dir) }} FILTER(isIRI(?y)) }}
+    MAX LENGTH {int(max_len)} LIMIT 1
+    """
+    path = [{"predicate": r["p"].split("#")[-1].split("/")[-1], "direction": r["dir"], "node": r["y"]}
+            for r in store.select(q) if r]
+    return {"from": from_iri, "to": to_iri, "backend": store.backend(),
+            "reachable": bool(path), "length": len(path) or None, "path": path}
+
+
 def kg_path(store: Store, from_iri: str, to_iri: str, max_len: int = 4) -> dict:
+    if isinstance(store, (StardogStore, StardogRunStore)) and from_iri != to_iri:
+        return _stardog_path(store, from_iri, to_iri, max_len)
     start, goal = from_iri, to_iri
     seen = {start}
     # queue of (node, path) where path = [(predicate, node), ...]
