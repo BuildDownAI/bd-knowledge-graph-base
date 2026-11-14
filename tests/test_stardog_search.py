@@ -234,6 +234,64 @@ def test_query_with_backslash_escaped_in_sparql():
 
 
 # ---------------------------------------------------------------------------
+# _search_match_all / kg_search — PullRequest and Repo via RdflibStore
+# ---------------------------------------------------------------------------
+
+def test_kg_search_matches_learning_pullrequest_repo():
+    """kg_search with RdflibStore returns Learning, PullRequest, and Repo when each
+    has the search text in its title."""
+    import tempfile
+    from pathlib import Path
+    from kg_ingest.iris import NAMESPACE as NS
+    from kg_query import queries
+    from kg_query.store import RdflibStore
+
+    trig = f"""
+    @prefix kg: <{NS}onto#> .
+    @prefix dcterms: <http://purl.org/dc/terms/> .
+    <{NS}resource/graph/test> {{
+      <{NS}resource/node/learn1> a kg:Learning ;
+        dcterms:title "bump the plugin version" .
+      <{NS}resource/node/pr1> a kg:PullRequest ;
+        dcterms:title "bump version for release" .
+      <{NS}resource/node/repo1> a kg:Repo ;
+        dcterms:title "bump-tools repo" .
+    }}
+    """
+    d = tempfile.mkdtemp()
+    p = Path(d, "g.trig")
+    p.write_text(trig)
+    store = RdflibStore(p)
+
+    result = queries.kg_search(store, "bump", limit=10)
+    types = {r["type"] for r in result["results"]}
+    assert "Learning" in types, f"expected Learning, got: {types}"
+    assert "PullRequest" in types, f"expected PullRequest, got: {types}"
+    assert "Repo" in types, f"expected Repo, got: {types}"
+    assert result["count"] == 3, f"expected 3 results, got: {result['count']}"
+
+
+def test_hybrid_search_lexical_contains_pullrequest_repo_twice():
+    """hybrid_search SPARQL contains 'kg:PullRequest kg:Repo' exactly twice
+    (once per copy of the lexical subquery in the self-join)."""
+    store = FakeStore([])
+    stardog_search.hybrid_search(store, "bump", limit=5)
+    q = store.queries[0]
+    assert q.count("kg:PullRequest kg:Repo") == 2, (
+        f"expected 2 occurrences of 'kg:PullRequest kg:Repo', got: {q.count('kg:PullRequest kg:Repo')}"
+    )
+
+
+def test_semantic_search_does_not_contain_pullrequest_repo():
+    """semantic_search SPARQL does not reference PullRequest or Repo — semantic leg is unchanged."""
+    store = FakeStore([])
+    stardog_search.semantic_search(store, "bump", limit=5)
+    q = store.queries[0]
+    assert "kg:PullRequest" not in q
+    assert "kg:Repo" not in q
+
+
+# ---------------------------------------------------------------------------
 # kg_neighbors excludes kg:card* predicates
 # ---------------------------------------------------------------------------
 
@@ -401,6 +459,9 @@ if __name__ == "__main__":
         test_screaming_snake_produces_boost,
         test_query_with_double_quote_escaped_in_sparql,
         test_query_with_backslash_escaped_in_sparql,
+        test_kg_search_matches_learning_pullrequest_repo,
+        test_hybrid_search_lexical_contains_pullrequest_repo_twice,
+        test_semantic_search_does_not_contain_pullrequest_repo,
         test_kg_neighbors_excludes_card_predicates,
     ]
     failed = 0
