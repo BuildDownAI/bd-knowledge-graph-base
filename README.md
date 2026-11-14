@@ -171,6 +171,12 @@ retries that call for up to 5 minutes before raising.
 graph is empty. Set `KG_STARDOG_DATASET` to the alias graph, for example
 `tag:stardog:kit:alias:builddown_kg`. Without it, all queries return empty results.
 
+**Semantic and hybrid search:** When `KG_BACKEND=stardog_run`, `kg_semantic_search` and
+`kg_hybrid_search` run entirely inside the database using Stardog's semantic FTS index —
+no `embeddings.npz` is read and no local embedding model is loaded. The graph must have the
+card predicates (`kg:cardText`, `kg:cardTitle`, `kg:cardType`, `kg:cardSnippet`) written by
+the publish step; without them, search returns empty results.
+
 **Creating a token:** Open the endpoint's detail page in the Stardog Run console, go to
 "Endpoint API tokens", and create a token. Or use the CLI:
 

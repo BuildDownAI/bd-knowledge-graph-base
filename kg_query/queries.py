@@ -32,6 +32,19 @@ def _iri(s: str) -> str:
     return f"<{s}>"
 
 
+def _search_match(node: str, t: str, v: str = "") -> str:
+    """kg_search's match: ?{node} is a searchable node whose topic or title contains `t`
+    (lowercased, escaped). Binds ?{v}type, ?{v}title, ?{v}tlabel and ?{v}matched; `v`
+    keeps two copies apart in one query."""
+    return f"""VALUES ?{v}type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
+      ?{node} a ?{v}type ; dcterms:title ?{v}title .
+      OPTIONAL {{ ?{node} kg:tagged ?{v}topic . ?{v}topic skos:prefLabel ?{v}tlabel }}
+      BIND(
+        IF(BOUND(?{v}tlabel) && CONTAINS(LCASE(?{v}tlabel), "{t}"), ?{v}tlabel,
+          IF(CONTAINS(LCASE(?{v}title), "{t}"), "(title match)", "")) AS ?{v}matched)
+      FILTER(?{v}matched != "")"""
+
+
 # --------------------------------------------------------------------------- #
 # kg_search — topic-based (MVP)
 # --------------------------------------------------------------------------- #
@@ -42,21 +55,24 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     ImplementationNote, PlanningNote), PullRequest titles, and Repo names.
     """
     t = _lit(term.lower())
-    # Keep all variables at outer scope: a FILTER inside a UNION branch only sees
-    # variables bound *within* that branch (SPARQL spec; Stardog enforces it,
-    # rdflib does not). So we OPTIONAL the topic then decide the match with BIND.
+    # Semantic types use _search_match (topic label or title); PullRequest/Repo match
+    # title only via a separate UNION branch. OPTIONAL fields (category, priority, fix)
+    # are outside the UNION so they apply to all matched nodes.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote kg:PullRequest kg:Repo }}
-      ?learning a ?type ; dcterms:title ?title .
+      {{
+        {_search_match("learning", t)}
+      }}
+      UNION
+      {{
+        VALUES ?type {{ kg:PullRequest kg:Repo }}
+        ?learning a ?type ; dcterms:title ?title .
+        BIND(IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "") AS ?matched)
+        FILTER(?matched != "")
+      }}
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
       OPTIONAL {{ ?learning kg:fix ?fix }}
-      OPTIONAL {{ ?learning kg:tagged ?topic . ?topic skos:prefLabel ?tlabel }}
-      BIND(
-        IF(BOUND(?tlabel) && CONTAINS(LCASE(?tlabel), "{t}"), ?tlabel,
-          IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "")) AS ?matched)
-      FILTER(?matched != "")
     }} ORDER BY ?learning LIMIT {int(limit) * 6}
     """
     by_iri: dict[str, dict] = {}
@@ -92,6 +108,7 @@ def kg_neighbors(store: Store, iri: str, limit: int = 30) -> dict:
       OPTIONAL {{ ?other skos:prefLabel ?pl }}
       OPTIONAL {{ ?other kg:path ?pa }}
       BIND(COALESCE(?t, ?pl, ?pa) AS ?olabel)
+      FILTER(!STRSTARTS(STR(?pred), STR(kg:card)))
     }} ORDER BY ?dir ?pred ?other LIMIT {int(limit)}
     """
     edges = [{
