@@ -96,9 +96,10 @@ Repos listed more than once across `code_repo`, `secondary_repos`, and `self_ing
 
 ```
 sources.yml            # THE source manifest (edit this first; includes namespace)
+                       # Set KG_NAMESPACE env var to override namespace: in sources.yml.
 ontology/              # kg.ttl (classes/predicates) + shapes.ttl (SHACL provenance invariant)
 kg_ingest/             # spine + semantic + tracker ingesters, embeddings, snapshot writer
-kg_query/              # store seam (rdflib|Stardog), read tools, hybrid search, MCP server
+kg_query/              # store seam (rdflib|Stardog|StardogRunStore), read tools, hybrid search, MCP server
 docs/design/           # how the ingest works, semantic + hybrid search design
 learnings/             # the improvement loop's inbox — accept / decline / defer, see CONTRIBUTING.md
 tests/                 # mechanical validation: SHACL invariant, tools, search
@@ -147,6 +148,41 @@ After `write_parts`, the ingest checks every file under `snapshot/` and **aborts
 clear error** if any file exceeds **95 MB** (e.g. a single subject whose triples exceed
 the cap, or `embeddings.npz` growing unexpectedly). This fires before the push so
 GitHub never sees the oversized file.
+
+## Serving from Stardog Run
+
+Set `KG_BACKEND=stardog_run` to serve queries from a [Stardog Run](https://www.stardog.com/stardog-run/)
+serverless endpoint instead of a local graph file.
+
+| Variable | Meaning |
+| -- | -- |
+| `KG_BACKEND=stardog_run` | Selects this store |
+| `KG_STARDOG_RUN_TOKEN` | Run API token. Required |
+| `KG_STARDOG_DB` | Database name. Required |
+| `KG_STARDOG_RUN_ENDPOINT` | Endpoint name. Optional; necessary only if the token lists more than one endpoint |
+| `KG_STARDOG_DATASET` | IRI sent as `default-graph-uri`. Optional; not set means the database default graph |
+| `KG_STARDOG_RUN_CONSOLE` | Console URL. Optional; default `https://console.stardog.run` |
+
+**Billing and wake:** Every query request to Stardog Run is billed. An inactive endpoint wakes
+on the first token-exchange request (`POST /api/token`) and may take up to 2 minutes; the store
+retries that call for up to 5 minutes before raising.
+
+**Dataset alias:** For a Knowledge Graph installed via the Stardog catalog, the database default
+graph is empty. Set `KG_STARDOG_DATASET` to the alias graph, for example
+`tag:stardog:kit:alias:builddown_kg`. Without it, all queries return empty results.
+
+**Semantic and hybrid search:** When `KG_BACKEND=stardog_run`, `kg_semantic_search` and
+`kg_hybrid_search` run entirely inside the database using Stardog's semantic FTS index —
+no `embeddings.npz` is read and no local embedding model is loaded. The graph must have the
+card predicates (`kg:cardText`, `kg:cardTitle`, `kg:cardType`, `kg:cardSnippet`) written by
+the publish step; without them, search returns empty results.
+
+**Creating a token:** Open the endpoint's detail page in the Stardog Run console, go to
+"Endpoint API tokens", and create a token. Or use the CLI:
+
+```bash
+sd api-token create --endpoint NAME --name kg --days 90
+```
 
 ## Host sizing
 

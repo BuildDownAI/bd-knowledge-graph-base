@@ -9,7 +9,7 @@ from collections import deque
 
 from kg_ingest.iris import KG as _KG, NAMESPACE
 
-from .store import Store
+from .store import Store, StardogStore, StardogRunStore
 
 PREFIXES = f"""
 PREFIX kg: <{_KG}>
@@ -32,6 +32,19 @@ def _iri(s: str) -> str:
     return f"<{s}>"
 
 
+def _search_match(node: str, t: str, v: str = "") -> str:
+    """kg_search's match: ?{node} is a searchable node whose topic or title contains `t`
+    (lowercased, escaped). Binds ?{v}type, ?{v}title, ?{v}tlabel and ?{v}matched; `v`
+    keeps two copies apart in one query."""
+    return f"""VALUES ?{v}type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
+      ?{node} a ?{v}type ; dcterms:title ?{v}title .
+      OPTIONAL {{ ?{node} kg:tagged ?{v}topic . ?{v}topic skos:prefLabel ?{v}tlabel }}
+      BIND(
+        IF(BOUND(?{v}tlabel) && CONTAINS(LCASE(?{v}tlabel), "{t}"), ?{v}tlabel,
+          IF(CONTAINS(LCASE(?{v}title), "{t}"), "(title match)", "")) AS ?{v}matched)
+      FILTER(?{v}matched != "")"""
+
+
 # --------------------------------------------------------------------------- #
 # kg_search — topic-based (MVP)
 # --------------------------------------------------------------------------- #
@@ -42,21 +55,24 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     ImplementationNote, PlanningNote), PullRequest titles, and Repo names.
     """
     t = _lit(term.lower())
-    # Keep all variables at outer scope: a FILTER inside a UNION branch only sees
-    # variables bound *within* that branch (SPARQL spec; Stardog enforces it,
-    # rdflib does not). So we OPTIONAL the topic then decide the match with BIND.
+    # Semantic types use _search_match (topic label or title); PullRequest/Repo match
+    # title only via a separate UNION branch. OPTIONAL fields (category, priority, fix)
+    # are outside the UNION so they apply to all matched nodes.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote kg:PullRequest kg:Repo }}
-      ?learning a ?type ; dcterms:title ?title .
+      {{
+        {_search_match("learning", t)}
+      }}
+      UNION
+      {{
+        VALUES ?type {{ kg:PullRequest kg:Repo }}
+        ?learning a ?type ; dcterms:title ?title .
+        BIND(IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "") AS ?matched)
+        FILTER(?matched != "")
+      }}
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
       OPTIONAL {{ ?learning kg:fix ?fix }}
-      OPTIONAL {{ ?learning kg:tagged ?topic . ?topic skos:prefLabel ?tlabel }}
-      BIND(
-        IF(BOUND(?tlabel) && CONTAINS(LCASE(?tlabel), "{t}"), ?tlabel,
-          IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "")) AS ?matched)
-      FILTER(?matched != "")
     }} ORDER BY ?learning LIMIT {int(limit) * 6}
     """
     by_iri: dict[str, dict] = {}
@@ -92,6 +108,7 @@ def kg_neighbors(store: Store, iri: str, limit: int = 30) -> dict:
       OPTIONAL {{ ?other skos:prefLabel ?pl }}
       OPTIONAL {{ ?other kg:path ?pa }}
       BIND(COALESCE(?t, ?pl, ?pa) AS ?olabel)
+      FILTER(!STRSTARTS(STR(?pred), STR(kg:card)))
     }} ORDER BY ?dir ?pred ?other LIMIT {int(limit)}
     """
     edges = [{
@@ -229,7 +246,24 @@ def kg_repo_history(store: Store, repo: str, branch: str | None = None,
             "count": len(results), "results": results}
 
 
+def _stardog_path(store: Store, from_iri: str, to_iri: str, max_len: int) -> dict:
+    """kg_path as one Stardog path query (shortest path over all edges, both directions)
+    instead of one kg_neighbors query per node visited. Same result shape.
+    Written by Michael Grove (Stardog) in PR 85 on BuildDownAI/knowledge-graph-ai-implement."""
+    q = f"""
+    PATHS START ?x = {_iri(from_iri)} END ?y = {_iri(to_iri)}
+    VIA {{ {{ ?x ?p ?y BIND("out" AS ?dir) }} UNION {{ ?y ?p ?x BIND("in" AS ?dir) }} FILTER(isIRI(?y)) }}
+    MAX LENGTH {int(max_len)} LIMIT 1
+    """
+    path = [{"predicate": r["p"].split("#")[-1].split("/")[-1], "direction": r["dir"], "node": r["y"]}
+            for r in store.select(q) if r]
+    return {"from": from_iri, "to": to_iri, "backend": store.backend(),
+            "reachable": bool(path), "length": len(path) or None, "path": path}
+
+
 def kg_path(store: Store, from_iri: str, to_iri: str, max_len: int = 4) -> dict:
+    if isinstance(store, (StardogStore, StardogRunStore)) and from_iri != to_iri:
+        return _stardog_path(store, from_iri, to_iri, max_len)
     start, goal = from_iri, to_iri
     seen = {start}
     # queue of (node, path) where path = [(predicate, node), ...]

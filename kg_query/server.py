@@ -19,8 +19,8 @@ import threading
 
 from mcp.server.fastmcp import FastMCP
 
-from . import queries, semantic, hybrid
-from .store import Store, get_store
+from . import queries, semantic, hybrid, stardog_search
+from .store import Store, StardogRunStore, get_store
 
 mcp = FastMCP(os.environ.get("KG_SERVER_NAME", "kg"))
 
@@ -74,6 +74,9 @@ def kg_semantic_search(query: str, limit: int = 10) -> dict:
     kg_provenance for full content. Requires the embeddings sidecar (build with
     `python -m kg_ingest.embed`); returns a friendly error if absent. Read-only.
     """
+    s = store()
+    if isinstance(s, StardogRunStore):
+        return stardog_search.semantic_search(s, query, limit)
     return semantic.semantic_search(query, limit, npz_path=semantic.resolve_npz())
 
 
@@ -89,7 +92,10 @@ def kg_hybrid_search(query: str, limit: int = 10) -> dict:
     Prefer this over `kg_search`/`kg_semantic_search` unless you specifically need
     exact-only or vector-only. Read-only.
     """
-    return hybrid.hybrid_search(store(), query, limit, npz_path=semantic.resolve_npz())
+    s = store()
+    if isinstance(s, StardogRunStore):
+        return stardog_search.hybrid_search(s, query, limit)
+    return hybrid.hybrid_search(s, query, limit, npz_path=semantic.resolve_npz())
 
 
 @mcp.tool()
