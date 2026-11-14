@@ -10,8 +10,6 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from kg_query import stardog_search
 from kg_query.queries import _lit
 
