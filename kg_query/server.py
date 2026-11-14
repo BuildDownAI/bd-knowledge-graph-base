@@ -74,9 +74,8 @@ def kg_semantic_search(query: str, limit: int = 10) -> dict:
     kg_provenance for full content. Requires the embeddings sidecar (build with
     `python -m kg_ingest.embed`); returns a friendly error if absent. Read-only.
     """
-    s = store()
-    if isinstance(s, StardogRunStore):
-        return stardog_search.semantic_search(s, query, limit)
+    if os.environ.get("KG_BACKEND", "").lower() == "stardog_run":
+        return stardog_search.semantic_search(store(), query, limit)
     return semantic.semantic_search(query, limit, npz_path=semantic.resolve_npz())
 
 
