@@ -276,7 +276,7 @@ def test_kg_neighbors_excludes_card_predicates():
 # ---------------------------------------------------------------------------
 
 def test_server_semantic_search_dispatches_for_stardog_run(monkeypatch):
-    """kg_semantic_search calls stardog_search.semantic_search for StardogRunStore."""
+    """kg_semantic_search calls stardog_search.semantic_search when KG_BACKEND=stardog_run."""
     from kg_query import server
     from kg_query.store import StardogRunStore
 
@@ -288,10 +288,32 @@ def test_server_semantic_search_dispatches_for_stardog_run(monkeypatch):
             return [{"iri": "http://kg/1", "s": "0.9", "title": "T",
                      "type": "Learning", "snippet": "S"}]
 
-    monkeypatch.setattr(server, "_store", _MockStore())
+    _mock = _MockStore()
+    monkeypatch.setenv("KG_BACKEND", "stardog_run")
+    monkeypatch.setattr(server, "store", lambda: _mock)
     result = server.kg_semantic_search("test")
     assert result["count"] == 1
     assert "model" in result  # stardog_search.semantic_search adds "model"
+
+
+def test_server_semantic_search_no_store_call_on_local_backend(monkeypatch):
+    """kg_semantic_search does not call store() when KG_BACKEND is not stardog_run."""
+    from kg_query import server, semantic
+
+    def _must_not_call():
+        raise RuntimeError("store() must not be called on the local path")
+
+    called = []
+
+    def fake_sem(query, limit, npz_path=None):
+        called.append(query)
+        return {"query": query, "count": 0, "results": []}
+
+    monkeypatch.delenv("KG_BACKEND", raising=False)
+    monkeypatch.setattr(server, "store", _must_not_call)
+    monkeypatch.setattr(semantic, "semantic_search", fake_sem)
+    server.kg_semantic_search("hello")
+    assert called == ["hello"]
 
 
 def test_server_hybrid_search_dispatches_for_stardog_run(monkeypatch):

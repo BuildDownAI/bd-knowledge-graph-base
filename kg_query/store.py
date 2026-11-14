@@ -206,9 +206,15 @@ class StardogRunStore(Store):
                 renewed = True
                 continue
             retry = resp.headers.get("Retry-After")
-            if resp.status_code == 503 and retry and time.monotonic() + int(retry) < deadline:
-                time.sleep(int(retry))
-                continue
+            if resp.status_code == 503 and retry:
+                try:
+                    seconds = int(retry)
+                except ValueError:
+                    seconds = 5
+                seconds = max(1, seconds)
+                if time.monotonic() + seconds < deadline:
+                    time.sleep(seconds)
+                    continue
             if resp.status_code >= 400:
                 raise RuntimeError(f"Stardog Run {method} {path}: HTTP {resp.status_code} {resp.text[:200]}")
             return resp

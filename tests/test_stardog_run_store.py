@@ -280,6 +280,64 @@ def test_503_no_retry_after_raises_immediately():
         assert ft.sleep_calls == [], "sleep should not be called for 503 with no Retry-After"
 
 
+def test_503_retry_after_zero_waits_one_second():
+    """503 with Retry-After: 0 waits max(1, 0) = 1 second before retry."""
+    with _FakeServer() as srv:
+        srv.add("GET", "/api/cli/endpoints", 200, _endpoints(srv.url))
+        srv.add("POST", "/api/token", 200, _token_body(srv.url))
+        srv.add("POST", "/ns/ep/query", 503, b"starting", {"Retry-After": "0"})
+        srv.add("POST", "/ns/ep/query", 200, _empty_sparql_result())
+
+        # deadline(0→300), token-deadline, minted(1), 503-check(0+1<300→retry)
+        ft = FakeTime([0.0, 0.0, 1.0, 0.0])
+        with patch("kg_query.store.time", ft):
+            store = StardogRunStore(api_token="t", db="ns/ep", console=srv.url)
+            result = store.select("SELECT * WHERE { ?s ?p ?o }")
+
+        assert result == []
+        assert ft.sleep_calls == [1], f"expected sleep(1), got {ft.sleep_calls}"
+        assert srv.call_count("POST", "/ns/ep/query") == 2
+
+
+def test_503_retry_after_http_date_waits_five_seconds():
+    """503 with Retry-After as an HTTP date falls back to 5 seconds, no ValueError."""
+    with _FakeServer() as srv:
+        srv.add("GET", "/api/cli/endpoints", 200, _endpoints(srv.url))
+        srv.add("POST", "/api/token", 200, _token_body(srv.url))
+        srv.add("POST", "/ns/ep/query", 503, b"starting",
+                {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        srv.add("POST", "/ns/ep/query", 200, _empty_sparql_result())
+
+        # deadline(0→300), token-deadline, minted(1), 503-check(0+5<300→retry)
+        ft = FakeTime([0.0, 0.0, 1.0, 0.0])
+        with patch("kg_query.store.time", ft):
+            store = StardogRunStore(api_token="t", db="ns/ep", console=srv.url)
+            result = store.select("SELECT * WHERE { ?s ?p ?o }")
+
+        assert result == []
+        assert ft.sleep_calls == [5], f"expected sleep(5), got {ft.sleep_calls}"
+        assert srv.call_count("POST", "/ns/ep/query") == 2
+
+
+def test_503_retry_after_seven_waits_seven_seconds():
+    """503 with Retry-After: 7 waits 7 seconds before retry."""
+    with _FakeServer() as srv:
+        srv.add("GET", "/api/cli/endpoints", 200, _endpoints(srv.url))
+        srv.add("POST", "/api/token", 200, _token_body(srv.url))
+        srv.add("POST", "/ns/ep/query", 503, b"starting", {"Retry-After": "7"})
+        srv.add("POST", "/ns/ep/query", 200, _empty_sparql_result())
+
+        # deadline(0→300), token-deadline, minted(1), 503-check(0+7<300→retry)
+        ft = FakeTime([0.0, 0.0, 1.0, 0.0])
+        with patch("kg_query.store.time", ft):
+            store = StardogRunStore(api_token="t", db="ns/ep", console=srv.url)
+            result = store.select("SELECT * WHERE { ?s ?p ?o }")
+
+        assert result == []
+        assert ft.sleep_calls == [7], f"expected sleep(7), got {ft.sleep_calls}"
+        assert srv.call_count("POST", "/ns/ep/query") == 2
+
+
 # ---------------------------------------------------------------------------
 # Tests: 502 wake retry on /api/token
 # ---------------------------------------------------------------------------
@@ -540,6 +598,9 @@ if __name__ == "__main__":
         test_401_twice_raises,
         test_503_retry_after_retries,
         test_503_no_retry_after_raises_immediately,
+        test_503_retry_after_zero_waits_one_second,
+        test_503_retry_after_http_date_waits_five_seconds,
+        test_503_retry_after_seven_waits_seven_seconds,
         test_502_token_retried_until_wake_seconds,
         test_502_token_succeeds_after_one_retry,
         test_new_token_shape_uses_edge_token,
