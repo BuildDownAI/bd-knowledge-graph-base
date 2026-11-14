@@ -45,6 +45,17 @@ def _search_match(node: str, t: str, v: str = "") -> str:
       FILTER(?{v}matched != "")"""
 
 
+def _search_match_all(node: str, t: str, v: str = "") -> str:
+    """kg_search's full match: _search_match for the semantic types, plus PullRequest and
+    Repo by title. Binds the same variables as _search_match."""
+    return f"""{{ {_search_match(node, t, v)} }}
+      UNION
+      {{ VALUES ?{v}type {{ kg:PullRequest kg:Repo }}
+        ?{node} a ?{v}type ; dcterms:title ?{v}title .
+        BIND(IF(CONTAINS(LCASE(?{v}title), "{t}"), "(title match)", "") AS ?{v}matched)
+        FILTER(?{v}matched != "") }}"""
+
+
 # --------------------------------------------------------------------------- #
 # kg_search — topic-based (MVP)
 # --------------------------------------------------------------------------- #
@@ -55,21 +66,9 @@ def kg_search(store: Store, term: str, limit: int = 10) -> dict:
     ImplementationNote, PlanningNote), PullRequest titles, and Repo names.
     """
     t = _lit(term.lower())
-    # Semantic types use _search_match (topic label or title); PullRequest/Repo match
-    # title only via a separate UNION branch. OPTIONAL fields (category, priority, fix)
-    # are outside the UNION so they apply to all matched nodes.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      {{
-        {_search_match("learning", t)}
-      }}
-      UNION
-      {{
-        VALUES ?type {{ kg:PullRequest kg:Repo }}
-        ?learning a ?type ; dcterms:title ?title .
-        BIND(IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "") AS ?matched)
-        FILTER(?matched != "")
-      }}
+      {_search_match_all("learning", t)}
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
       OPTIONAL {{ ?learning kg:fix ?fix }}

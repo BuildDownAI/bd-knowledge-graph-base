@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 from . import hybrid
-from .queries import PREFIXES, _lit, _search_match
+from .queries import PREFIXES, _lit, _search_match_all
 
 MODEL = "all-MiniLM-L6-v2"  # Stardog's default search.semantic.model
 
@@ -23,7 +23,7 @@ def _semantic(query: str, limit: int, iri: str, score: str) -> str:
 def _lexical(query: str, limit: int, iri: str) -> str:
     """kg_search's match as a subquery: the first `limit` matching nodes by IRI."""
     return f"""{{ SELECT DISTINCT ?{iri} WHERE {{
-      {_search_match(iri, _lit(query.lower()), f"{iri}_")}
+      {_search_match_all(iri, _lit(query.lower()), f"{iri}_")}
     }} ORDER BY ?{iri} LIMIT {int(limit)} }}"""
 
 
