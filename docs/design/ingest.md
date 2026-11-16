@@ -124,6 +124,60 @@ it to `sources.yml` and its learnings are picked up with no code change.
 
 ---
 
+## 4a. PR review comment ingest (KGB-47)
+
+In addition to conversation comments (`issues/{n}/comments`), the spine fetches two
+more GitHub endpoints per PR and keeps their substantive content as `kg:Verification`
+nodes:
+
+- **Inline review comments** — `pulls/{n}/comments` (line-anchored diff comments from
+  any reviewer).
+- **Review bodies** — `pulls/{n}/reviews` (the summary comment submitted with an
+  Approve / Request changes / Comment review).
+
+Both endpoints use the same retry-on-rate-limit loop and error-count threshold as the
+conversation-comment fetch. A fetch error on either endpoint counts toward
+`KG_PR_COMMENTS_INCOMPLETE` in the same way.
+
+**Keep rules for review content** (conversation comments keep the existing rules):
+
+| Source | Keep when |
+|---|---|
+| Inline review comment | Stripped text ≥ 20 chars, **or** body contains a known bot marker |
+| Review body | Stripped text ≥ 20 chars, **or** state is `CHANGES_REQUESTED`, **or** known marker |
+| Either | Drop if text is approval-only ("LGTM", "👍", "Thanks!", etc.) |
+| Either | Drop AI-Implement `status=start` progress lines |
+
+**Reviewer classification** (`kg:reviewerKind`):
+
+| Reviewer | Login / marker | Kind |
+|---|---|---|
+| Hosted Codex | `chatgpt-codex-connector[bot]` or `codex-code-review-finding:v1` / `codex-review-receipt:v1` / `codex-review-state:v1` in body | `codex` |
+| Claude GHA | `claude[bot]`, or `github-actions[bot]` with `<!-- claude-review-verdict` | `claude` |
+| AI-Implement post-push | `<!-- ai-implement review-finding:v1 -->` or `<!-- ai-implement native-review -->` in body | `ai-implement` |
+| Person | any non-bot login | `human` |
+| Other bot | `[bot]` or `-bot` suffix, not matched above | `other-bot` |
+
+**Severity extraction** (`kg:severity`):
+
+- Codex: P0/P1/P2 badge in body.
+- Claude: 🔴 heading → `blocking`; 🟡 heading → `warning`; `severity:` line → that value.
+- AI-Implement: `[blocking]` / `[medium]` / `[minor]` badge.
+- Human: `changes_requested` when review state is `CHANGES_REQUESTED`; otherwise `unknown`.
+
+**Thread state** (`kg:threadState`, inline comments only):
+
+Thread states are read from GraphQL `pullRequest.reviewThreads`. If the call fails or
+the thread cannot be matched, the state is recorded as `unknown` — never as `open` or
+`resolved`. Possible values: `resolved`, `outdated`, `open`, `unknown`.
+
+**Cap**: inline review comments are capped at `_MAX_PR_REVIEW_ITEMS = 100` items
+and review bodies are capped at `_MAX_PR_REVIEW_ITEMS = 100` items (each limit
+applied separately, each separate from `_MAX_PR_COMMENTS`), so the maximum per PR
+is 200 items combined. A log line is printed when either cap fires.
+
+---
+
 ## 5. Jira tracker-data ingestion
 
 The graph **vocabulary is already provider-neutral** — `kg:Issue`, `kg:partOf`,

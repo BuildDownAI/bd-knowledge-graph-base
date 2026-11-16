@@ -1,7 +1,8 @@
 """cards.build_cards over a tiny fixture graph.
 Run: PYTHONPATH=. ./.venv/bin/python tests/test_cards.py
 """
-import os, tempfile
+import os
+import tempfile
 from kg_ingest.iris import DEFAULT_NAMESPACE as _DNS, NAMESPACE as _NS
 from kg_ingest.cards import build_cards, SNIPPET_CHARS
 from kg_query.store import RdflibStore
@@ -33,9 +34,10 @@ FIXTURE_RAW = """
 """
 FIXTURE = FIXTURE_RAW.replace(_DNS, _NS)
 
-def main():
+def test_cards():
     with tempfile.NamedTemporaryFile("w", suffix=".trig", delete=False) as f:
-        f.write(FIXTURE); path = f.name
+        f.write(FIXTURE)
+        path = f.name
     try:
         cards = build_cards(RdflibStore(path))
     finally:
@@ -75,4 +77,4 @@ def main():
     print(f"PASS: build_cards -> {len(cards)} cards {types}")
 
 if __name__ == "__main__":
-    main()
+    test_cards()

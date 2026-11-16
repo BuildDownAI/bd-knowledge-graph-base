@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import sys
 
+import pytest
+
 try:
-    import mcp  # noqa: F401
+    import mcp  # noqa: F401  # presence-check import; result captured in HAVE_MCP flag above
     HAVE_MCP = True
 except ImportError:
     HAVE_MCP = False
@@ -71,10 +73,9 @@ async def _ingest_fixture(server):
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_lazy_import() -> None:
     """Importing kg_ingest.mcp_source must not import mcp at module level."""
-    import importlib
-
     for key in list(sys.modules):
         if key.startswith("kg_ingest.mcp_source"):
             del sys.modules[key]
@@ -91,6 +92,7 @@ def test_lazy_import() -> None:
     print("PASS: test_lazy_import")
 
 
+@pytest.mark.network
 def test_parse_sections() -> None:
     """_parse_sections: title precedence, preamble level-0, no-h1 fallback."""
     from kg_ingest.mcp_source import _parse_sections
@@ -122,6 +124,7 @@ def test_parse_sections() -> None:
     print("PASS: test_parse_sections")
 
 
+@pytest.mark.network
 def test_end_to_end() -> None:
     """_ingest_from_session: page count, section cards, content_hash present."""
     pages = asyncio.run(_ingest_fixture(_make_fixture_server()))
@@ -153,6 +156,7 @@ def test_end_to_end() -> None:
     print("PASS: test_end_to_end")
 
 
+@pytest.mark.network
 def test_content_hash_determinism() -> None:
     """Two fetches of identical content produce identical (uri, hash) pairs."""
     pairs1 = {(p.uri, p.content_hash) for p in asyncio.run(_ingest_fixture(_make_fixture_server()))}
@@ -196,6 +200,7 @@ def _build_rdf_graph_from_fixture():
 
 # ── RDF-level tests ────────────────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_rdf_emission() -> None:
     """cli._ingest_mcp_sources emits kg:McpSource, kg:DocPage, and kg:DocSection triples."""
     from rdflib.namespace import RDF
@@ -216,9 +221,6 @@ def test_rdf_emission() -> None:
     assert doc_sections, "no kg:DocSection nodes emitted"
 
     # multi-heading resources (guide, reference) must each produce >=1 DocSection
-    from kg_ingest.iris import KGR
-    from rdflib import Literal, URIRef
-    from rdflib.namespace import DCTERMS
     for page_iri in doc_pages:
         url_vals = list(spine_g.objects(page_iri, KG.url))
         if not url_vals:
@@ -234,6 +236,7 @@ def test_rdf_emission() -> None:
     print("PASS: test_rdf_emission")
 
 
+@pytest.mark.network
 def test_rdf_shacl_conforms() -> None:
     """Graph emitted by cli._ingest_mcp_sources passes SHACL validation."""
     from pyshacl import validate

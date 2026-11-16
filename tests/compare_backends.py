@@ -49,7 +49,8 @@ def main():
         s_res, s_ms = _time(lambda: queries.kg_search(sd, term, limit=25))
         match = _iris(r_res) == _iris(s_res)
         all_match &= match
-        rd_tot.append(r_ms); sd_tot.append(s_ms)
+        rd_tot.append(r_ms)
+        sd_tot.append(s_ms)
         print(f"{term:<16} {r_res['count']:>9} {s_res['count']:>10} "
               f"{'YES' if match else 'NO!':>8} {r_ms:>10.1f} {s_ms:>11.1f}")
 

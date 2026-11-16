@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 
 from rdflib import Graph, Literal
-from rdflib.namespace import RDF
 
 from kg_ingest import iris, spine
 from kg_ingest.snapshot import write_parts

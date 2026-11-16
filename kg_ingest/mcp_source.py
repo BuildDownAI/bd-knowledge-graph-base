@@ -61,6 +61,9 @@ def _parse_sections(text: str, uri: str) -> tuple[str, list[Section]]:
 
     # Collect raw chunks: (level, heading, body_lines)
     raw: list[tuple[int, str, list[str]]] = []
+    cur_level: int
+    cur_heading: str
+    cur_body: list[str]
     cur_level, cur_heading, cur_body = 0, "", []
 
     for line in lines:

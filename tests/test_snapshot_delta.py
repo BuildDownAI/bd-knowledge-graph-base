@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import Graph, URIRef
 from rdflib.namespace import RDF
 
 from kg_ingest.snapshot import write_parts, write_snapshot
@@ -34,7 +34,8 @@ _TRACKER_DATA = _FIXTURES / "tracker-data.json"
 _SLUG = "test-org/fixture"
 _TEAM = "TEST"
 _HEADINGS = ("AI Planning:",)
-_TO_GOLDEN_KEY = lambda t: f"{t}.nt"
+def _TO_GOLDEN_KEY(t):
+    return f"{t}.nt"
 
 
 def _make_fixture_repo(tmp: Path) -> Path:
@@ -166,13 +167,64 @@ def test_write_snapshot_fails_on_oversized_file() -> None:
             assert "96" in msg or "MB" in msg.upper(), (
                 f"exit message should mention size; got: {msg!r}"
             )
+            assert "raise _PART_SIZE_CAP" not in msg, (
+                f"exit message must not advise raising _PART_SIZE_CAP; got: {msg!r}"
+            )
+            assert "follow-up" in msg.lower(), (
+                f"exit message for embeddings.npz must mention follow-up; got: {msg!r}"
+            )
         print("PASS: write_snapshot fails with clear message on oversized file")
+
+
+def test_write_snapshot_fails_on_oversized_parts_file() -> None:
+    """write_snapshot raises SystemExit with parts-specific advice for an oversized parts/*.nt.
+
+    write_parts clears existing *.nt before writing, so pre-placing a large file
+    won't survive. Instead, temporarily lower _POST_WRITE_FAIL_THRESHOLD to 1 byte so
+    that the real .nt output from write_parts exceeds the limit and exercises the
+    `if f.is_relative_to(parts_subdir)` branch.
+    """
+    import kg_ingest.snapshot as snap_mod
+    from kg_ingest.iris import NAMESPACE as NS
+    g = Graph()
+    g.add((URIRef(f"{NS}resource/issue/EX-1"), RDF.type, URIRef(f"{NS}onto#Issue")))
+
+    original_threshold = snap_mod._POST_WRITE_FAIL_THRESHOLD
+    try:
+        snap_mod._POST_WRITE_FAIL_THRESHOLD = 1  # any non-empty .nt will exceed this
+        with tempfile.TemporaryDirectory() as tmp:
+            snap_dir = Path(tmp) / "snapshot"
+            try:
+                write_snapshot(g, snap_dir)
+                assert False, "write_snapshot should have raised SystemExit"
+            except SystemExit as exc:
+                msg = str(exc)
+                # Find the line(s) that mention a parts/ file.
+                parts_lines = [line for line in msg.splitlines() if "parts/" in line]
+                assert parts_lines, f"exit message must name a parts/ file; got: {msg!r}"
+                parts_line = " ".join(parts_lines)
+                assert "MB" in parts_line.upper(), (
+                    f"parts file line should mention size in MB; got: {parts_line!r}"
+                )
+                assert "reduce that subject" in parts_line, (
+                    f"parts file line must mention 'reduce that subject'; got: {parts_line!r}"
+                )
+                assert "raise _PART_SIZE_CAP" not in parts_line, (
+                    f"parts file line must not advise raising _PART_SIZE_CAP; got: {parts_line!r}"
+                )
+                assert "follow-up" not in parts_line.lower(), (
+                    f"parts file line must not mention follow-up; got: {parts_line!r}"
+                )
+    finally:
+        snap_mod._POST_WRITE_FAIL_THRESHOLD = original_threshold
+    print("PASS: write_snapshot fails with parts-specific advice on oversized parts file")
 
 
 def main() -> None:
     test_write_parts_splits_with_small_cap()
     test_write_parts_deterministic()
     test_write_snapshot_fails_on_oversized_file()
+    test_write_snapshot_fails_on_oversized_parts_file()
 
     write_mode = "--write" in sys.argv
 

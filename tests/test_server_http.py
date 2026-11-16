@@ -18,6 +18,8 @@ import time
 import urllib.error
 import urllib.request
 
+import pytest
+
 from kg_ingest.iris import NAMESPACE as NS
 
 EXPECTED_TOOLS = {
@@ -27,6 +29,7 @@ EXPECTED_TOOLS = {
     "kg_neighbors",
     "kg_provenance",
     "kg_path",
+    "kg_repo_history",
 }
 
 FIXTURE = f"""
@@ -97,7 +100,8 @@ def _post_jsonrpc(port: int, method: str, params: dict | None = None) -> tuple[i
             return e.code, {"raw": body.decode(errors="replace")}
 
 
-def main() -> None:
+@pytest.mark.network
+def test_server_http() -> None:
     with tempfile.NamedTemporaryFile(suffix=".trig", mode="w", delete=False) as f:
         f.write(FIXTURE)
         trig_path = f.name
@@ -127,11 +131,10 @@ def main() -> None:
                     proc.kill()
                     proc.wait()
                 stderr_out = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
-                print("FAIL: server did not bind port in time")
+                stderr_msg = ""
                 if stderr_out:
-                    print("--- server stderr ---")
-                    print(stderr_out)
-                sys.exit(1)
+                    stderr_msg = f"\n--- server stderr ---\n{stderr_out}"
+                pytest.fail(f"server did not bind port in time{stderr_msg}")
 
             namespace = env.get("KG_SERVER_NAME", "kg")
             print(f"== tools/list (port={port}, name={namespace}) ==")
@@ -151,7 +154,7 @@ def main() -> None:
             })
             assert status == 200, f"Expected HTTP 200 for tools/call, got {status}: {call_result}"
             assert "result" in call_result, f"Expected result key in response, got: {call_result}"
-            print(f"  kg_search OK")
+            print("  kg_search OK")
 
             print("\nALL HTTP SMOKE CHECKS PASSED")
         finally:
@@ -162,4 +165,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    test_server_http()

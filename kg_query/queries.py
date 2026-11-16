@@ -9,7 +9,7 @@ from collections import deque
 
 from kg_ingest.iris import KG as _KG, NAMESPACE
 
-from .store import Store
+from .store import Store, StardogStore, StardogRunStore
 
 PREFIXES = f"""
 PREFIX kg: <{_KG}>
@@ -32,33 +32,46 @@ def _iri(s: str) -> str:
     return f"<{s}>"
 
 
+def _search_match(node: str, t: str, v: str = "") -> str:
+    """kg_search's match: ?{node} is a searchable node whose topic or title contains `t`
+    (lowercased, escaped). Binds ?{v}type, ?{v}title, ?{v}tlabel and ?{v}matched; `v`
+    keeps two copies apart in one query."""
+    return f"""VALUES ?{v}type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
+      ?{node} a ?{v}type ; dcterms:title ?{v}title .
+      OPTIONAL {{ ?{node} kg:tagged ?{v}topic . ?{v}topic skos:prefLabel ?{v}tlabel }}
+      BIND(
+        IF(BOUND(?{v}tlabel) && CONTAINS(LCASE(?{v}tlabel), "{t}"), ?{v}tlabel,
+          IF(CONTAINS(LCASE(?{v}title), "{t}"), "(title match)", "")) AS ?{v}matched)
+      FILTER(?{v}matched != "")"""
+
+
+def _search_match_all(node: str, t: str, v: str = "") -> str:
+    """kg_search's full match: _search_match for the semantic types, plus PullRequest and
+    Repo by title. Binds the same variables as _search_match."""
+    return f"""{{ {_search_match(node, t, v)} }}
+      UNION
+      {{ VALUES ?{v}type {{ kg:PullRequest kg:Repo }}
+        ?{node} a ?{v}type ; dcterms:title ?{v}title .
+        BIND(IF(CONTAINS(LCASE(?{v}title), "{t}"), "(title match)", "") AS ?{v}matched)
+        FILTER(?{v}matched != "") }}"""
+
+
 # --------------------------------------------------------------------------- #
 # kg_search — topic-based (MVP)
 # --------------------------------------------------------------------------- #
 def kg_search(store: Store, term: str, limit: int = 10) -> dict:
-    """Find learnings whose topic (tag) OR title matches `term` (substring, ci).
+    """Find learnings, decisions, notes, PRs, and repos matching `term` (substring, ci).
 
-    Returns the transferable lesson: title, category, priority, fix snippet, and
-    which topics matched. This is the "first 30 seconds" surface (recon Q1, opt.1).
+    Matches topic/tag labels and titles across semantic nodes (Learning, Decision,
+    ImplementationNote, PlanningNote), PullRequest titles, and Repo names.
     """
     t = _lit(term.lower())
-    # Keep all variables at outer scope: a FILTER inside a UNION branch only sees
-    # variables bound *within* that branch (SPARQL spec; Stardog enforces it,
-    # rdflib does not). So we OPTIONAL the topic then decide the match with BIND.
-    # Learnings, Decisions (ADRs, plans, decision comments), ImplementationNotes
-    # (bot summaries), and PlanningNotes (tracker planning output) are all surfaced.
     q = PREFIXES + f"""
     SELECT DISTINCT ?learning ?type ?title ?category ?priority ?fix ?matched WHERE {{
-      VALUES ?type {{ kg:Learning kg:Decision kg:ImplementationNote kg:PlanningNote }}
-      ?learning a ?type ; dcterms:title ?title .
+      {_search_match_all("learning", t)}
       OPTIONAL {{ ?learning kg:category ?category }}
       OPTIONAL {{ ?learning kg:priority ?priority }}
       OPTIONAL {{ ?learning kg:fix ?fix }}
-      OPTIONAL {{ ?learning kg:tagged ?topic . ?topic skos:prefLabel ?tlabel }}
-      BIND(
-        IF(BOUND(?tlabel) && CONTAINS(LCASE(?tlabel), "{t}"), ?tlabel,
-          IF(CONTAINS(LCASE(?title), "{t}"), "(title match)", "")) AS ?matched)
-      FILTER(?matched != "")
     }} ORDER BY ?learning LIMIT {int(limit) * 6}
     """
     by_iri: dict[str, dict] = {}
@@ -94,6 +107,7 @@ def kg_neighbors(store: Store, iri: str, limit: int = 30) -> dict:
       OPTIONAL {{ ?other skos:prefLabel ?pl }}
       OPTIONAL {{ ?other kg:path ?pa }}
       BIND(COALESCE(?t, ?pl, ?pa) AS ?olabel)
+      FILTER(!STRSTARTS(STR(?pred), STR(kg:card)))
     }} ORDER BY ?dir ?pred ?other LIMIT {int(limit)}
     """
     edges = [{
@@ -148,7 +162,107 @@ def kg_provenance(store: Store, iri: str) -> dict:
 # --------------------------------------------------------------------------- #
 # kg_path — bounded BFS between two nodes over all edges (both directions)
 # --------------------------------------------------------------------------- #
+def _dt(s: str) -> str:
+    """Normalize a date/datetime string to xsd:dateTime format for SPARQL FILTERs."""
+    if "T" not in s:
+        return s + "T00:00:00Z"
+    return s
+
+
+def kg_repo_history(store: Store, repo: str, branch: str | None = None,
+                    since: str | None = None, until: str | None = None,
+                    pr: int | None = None, kind: str | None = None,
+                    limit: int = 100) -> dict:
+    """Return commits and/or merged PRs for a repo with optional filters.
+
+    repo:   owner/name slug (required)
+    branch: filter commits by repo historyBranch; filter PRs by baseRefName
+    since:  ISO date/datetime lower bound (inclusive) on commit date / PR mergedAt
+    until:  ISO date/datetime upper bound (inclusive) on commit date / PR mergedAt
+    pr:     filter to a specific PR number
+    kind:   "commit", "pr", or None for both
+    limit:  max results returned (default 100)
+    """
+    r = _lit(repo)
+    results: list[dict] = []
+
+    if kind in (None, "commit"):
+        branch_f = f'\n      ?repo kg:historyBranch "{_lit(branch)}" .' if branch else ""
+        date_f = ""
+        if since:
+            date_f += f'\n      FILTER(?date >= "{_lit(_dt(since))}"^^xsd:dateTime)'
+        if until:
+            date_f += f'\n      FILTER(?date <= "{_lit(_dt(until))}"^^xsd:dateTime)'
+        q = PREFIXES + f"""
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?node ?title ?sha ?date WHERE {{
+          ?node a kg:Commit ; kg:partOf ?repo ; dcterms:created ?date .
+          ?repo kg:sourceId "{r}" .{branch_f}
+          OPTIONAL {{ ?node dcterms:title ?title }}
+          OPTIONAL {{ ?node kg:sourceId ?sha }}{date_f}
+        }} ORDER BY DESC(?date) LIMIT {int(limit)}
+        """
+        for row in store.select(q):
+            results.append({
+                "type": "Commit", "iri": row.get("node"),
+                "title": row.get("title", ""), "sha": row.get("sha"),
+                "date": row.get("date"),
+            })
+
+    if kind in (None, "pr"):
+        pr_f = f'\n      FILTER(?number = {int(pr)})' if pr is not None else ""
+        branch_f = f'\n      FILTER(?baseRef = "{_lit(branch)}")' if branch else ""
+        date_f = ""
+        if since:
+            date_f += f'\n      FILTER(BOUND(?date) && ?date >= "{_lit(_dt(since))}"^^xsd:dateTime)'
+        if until:
+            date_f += f'\n      FILTER(BOUND(?date) && ?date <= "{_lit(_dt(until))}"^^xsd:dateTime)'
+        q = PREFIXES + f"""
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?node ?title ?number ?state ?date ?baseRef WHERE {{
+          ?node a kg:PullRequest ; kg:partOf ?repo .
+          ?repo kg:sourceId "{r}" .
+          OPTIONAL {{ ?node dcterms:title ?title }}
+          OPTIONAL {{ ?node kg:number ?number }}
+          OPTIONAL {{ ?node kg:state ?state }}
+          OPTIONAL {{ ?node kg:mergedAt ?date }}
+          OPTIONAL {{ ?node kg:baseRefName ?baseRef }}{pr_f}{branch_f}{date_f}
+        }} ORDER BY DESC(?number) LIMIT {int(limit)}
+        """
+        for row in store.select(q):
+            num = row.get("number")
+            results.append({
+                "type": "PullRequest", "iri": row.get("node"),
+                "title": row.get("title", ""),
+                "number": int(num) if num is not None else None,
+                "state": row.get("state"), "date": row.get("date"),
+                "base_ref": row.get("baseRef"),
+            })
+
+    results.sort(key=lambda x: x.get("date") or "", reverse=True)
+    results = results[:int(limit)]
+    return {"repo": repo, "backend": store.backend(),
+            "count": len(results), "results": results}
+
+
+def _stardog_path(store: Store, from_iri: str, to_iri: str, max_len: int) -> dict:
+    """kg_path as one Stardog path query (shortest path over all edges, both directions)
+    instead of one kg_neighbors query per node visited. Same result shape.
+    Written by Michael Grove (Stardog) in PR 85 on BuildDownAI/knowledge-graph-ai-implement."""
+    q = f"""
+    PATHS START ?x = {_iri(from_iri)} END ?y = {_iri(to_iri)}
+    VIA {{ {{ ?x ?p ?y BIND("out" AS ?dir) }} UNION {{ ?y ?p ?x BIND("in" AS ?dir) }} FILTER(isIRI(?y)) }}
+    MAX LENGTH {int(max_len)} LIMIT 1
+    """
+    path = [{"predicate": r["p"].split("#")[-1].split("/")[-1], "direction": r["dir"], "node": r["y"]}
+            for r in store.select(q) if r]
+    return {"from": from_iri, "to": to_iri, "backend": store.backend(),
+            "reachable": bool(path), "length": len(path) or None, "path": path}
+
+
 def kg_path(store: Store, from_iri: str, to_iri: str, max_len: int = 4) -> dict:
+    if isinstance(store, (StardogStore, StardogRunStore)) and from_iri != to_iri:
+        return _stardog_path(store, from_iri, to_iri, max_len)
     start, goal = from_iri, to_iri
     seen = {start}
     # queue of (node, path) where path = [(predicate, node), ...]

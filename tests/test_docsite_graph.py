@@ -5,7 +5,7 @@ Run: PYTHONPATH=. ./.venv/bin/python tests/test_docsite_graph.py
 import tempfile
 from pathlib import Path
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import Graph, Literal
 from rdflib.namespace import RDF, XSD, Namespace
 from pyshacl import validate
 

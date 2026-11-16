@@ -6,17 +6,19 @@ emitting RDF into the spine named graph. Re-derivable: same repo state -> same t
 from __future__ import annotations
 
 import fnmatch
+from datetime import datetime
 import json
 import re
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 from rdflib import Graph, Literal, URIRef
 from rdflib.namespace import RDF, RDFS, XSD, Namespace
 
 from . import iris, normalize
-from .tracker import _classify_pr_comment, _first_line
+from .tracker import _classify_pr_comment, _first_line, should_keep_review_item
 
 KG = iris.KG
 PROV = Namespace("http://www.w3.org/ns/prov#")
@@ -26,10 +28,38 @@ FOAF = Namespace("http://xmlns.com/foaf/0.1/")
 DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt"}
 
 _MAX_PR_COMMENTS = 50
+_MAX_PR_REVIEW_ITEMS = 100
 
 # Retry delays (seconds) for rate-limited PR comment fetches.
 # Injectable for tests: monkeypatch spine._RETRY_DELAYS = (0, 0, 0).
 _RETRY_DELAYS: tuple[int, ...] = (5, 15, 45)
+
+
+def _parse_paginated_json(text: str) -> tuple[list[dict], int]:
+    """Parse concatenated JSON arrays from `gh api --paginate`; returns (items, page_count).
+
+    gh api --paginate outputs each page's JSON array separately (not combined),
+    so the stdout may be multiple valid JSON arrays concatenated.
+    """
+    result: list[dict] = []
+    pages = 0
+    decoder = json.JSONDecoder()
+    pos = 0
+    text = text.strip()
+    while pos < len(text):
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos >= len(text):
+            break
+        try:
+            obj, new_pos = decoder.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            break
+        if isinstance(obj, list):
+            result.extend(obj)
+            pages += 1
+        pos = new_pos
+    return result, pages
 
 
 class PRCommentsIncomplete(Exception):
@@ -90,8 +120,8 @@ def _git(repo_path: Path, *args: str) -> str:
 
 
 def _is_bot(login: str) -> bool:
-    l = login.lower()
-    return l.endswith("[bot]") or l.endswith("-bot") or "bot]" in l
+    login_lower = login.lower()
+    return login_lower.endswith("[bot]") or login_lower.endswith("-bot") or "bot]" in login_lower
 
 
 def _pr_comment_run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
@@ -138,9 +168,157 @@ def _add_pr_comments(g: Graph, run: URIRef, repo_slug: str, pr_number: int,
     return count
 
 
+def _strip_badges(text: str) -> str:
+    """Remove markdown badge markup like ![P2](...), keeping alt text."""
+    return re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+
+
+def _fetch_thread_states(repo_path: Path, repo_slug: str, pr_number: int) -> dict[int, str]:
+    """Return {inline_comment_id: state} for a PR via GraphQL reviewThreads.
+
+    State is 'resolved', 'outdated', or 'open'. Returns {} on any error so
+    callers record 'unknown' rather than silently marking threads as open.
+    """
+    owner, repo_name = repo_slug.split("/", 1)
+    query = (
+        "query($owner: String!, $name: String!, $number: Int!) {"
+        " repository(owner: $owner, name: $name) {"
+        " pullRequest(number: $number) {"
+        " reviewThreads(first: 100) {"
+        " nodes { isResolved isOutdated"
+        " comments(first: 1) { nodes { databaseId } } }"
+        " } } } }"
+    )
+    try:
+        result = subprocess.run(
+            ["gh", "api", "graphql",
+             "-f", f"query={query}",
+             "-F", f"owner={owner}",
+             "-F", f"name={repo_name}",
+             "-F", f"number={pr_number}"],
+            capture_output=True, text=True, check=True, cwd=str(repo_path),
+        )
+        data = json.loads(result.stdout)
+        threads = (
+            (data.get("data") or {})
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("reviewThreads", {})
+            .get("nodes", [])
+        )
+        thread_map: dict[int, str] = {}
+        for thread in threads:
+            if thread.get("isResolved"):
+                state = "resolved"
+            elif thread.get("isOutdated"):
+                state = "outdated"
+            else:
+                state = "open"
+            first_comments = (thread.get("comments") or {}).get("nodes") or []
+            if first_comments:
+                db_id = (first_comments[0] or {}).get("databaseId")
+                if db_id is not None:
+                    thread_map[int(db_id)] = state
+        return thread_map
+    except (subprocess.CalledProcessError, json.JSONDecodeError,
+            KeyError, ValueError, FileNotFoundError):
+        return {}
+
+
+def _add_pr_review_content(
+    g: Graph, run: URIRef, repo_slug: str, pr_number: int,
+    pnode: URIRef, review_comments: list[dict],
+    reviews: list[dict], thread_states: dict[int, str],
+    stats: dict,
+) -> int:
+    """Classify and emit kg:Verification nodes for PR review content. Returns count added."""
+    count = 0
+
+    for rc in review_comments:
+        body = (rc.get("body") or "").strip()
+        login = (rc.get("user") or {}).get("login") or "unknown"
+        keep, reviewer_kind, severity = should_keep_review_item(body, login, is_review_body=False)
+        if not keep:
+            continue
+        cid = rc["id"]
+        cnode = iris.pr_review_comment(repo_slug, pr_number, cid)
+        g.add((cnode, RDF.type, KG.Verification))
+        title_text = _first_line(_strip_badges(body))[:400] or str(cid)
+        g.add((cnode, DCTERMS.title, Literal(title_text, datatype=XSD.string)))
+        g.add((cnode, KG.fix, Literal(body[:400])))
+        created_at = rc.get("created_at") or ""
+        if created_at:
+            g.add((cnode, DCTERMS.created, Literal(created_at, datatype=XSD.dateTime)))
+        p = iris.person(login)
+        g.add((p, RDF.type, KG.BotAgent if _is_bot(login) else KG.Person))
+        g.add((p, KG.login, Literal(login)))
+        g.add((cnode, PROV.wasAttributedTo, p))
+        g.add((cnode, KG.about, pnode))
+        g.add((cnode, PROV.wasDerivedFrom, pnode))
+        g.add((cnode, PROV.wasGeneratedBy, run))
+        g.add((cnode, KG.reviewerLogin, Literal(login)))
+        g.add((cnode, KG.reviewerKind, Literal(reviewer_kind)))
+        g.add((cnode, KG.severity, Literal(severity)))
+        path = rc.get("path") or ""
+        if path:
+            g.add((cnode, KG.reviewFilePath, Literal(path)))
+        line = rc.get("line") if rc.get("line") is not None else rc.get("original_line")
+        if line is not None:
+            g.add((cnode, KG.reviewLine, Literal(int(line), datatype=XSD.integer)))
+        commit_id = rc.get("commit_id") or ""
+        if commit_id:
+            g.add((cnode, KG.commitId, Literal(commit_id)))
+        original_commit_id = rc.get("original_commit_id") or ""
+        if original_commit_id:
+            g.add((cnode, KG.originalCommitId, Literal(original_commit_id)))
+        thread_state = thread_states.get(cid, "unknown")
+        g.add((cnode, KG.threadState, Literal(thread_state)))
+        count += 1
+
+    for rev in reviews:
+        body = (rev.get("body") or "").strip()
+        login = (rev.get("user") or {}).get("login") or "unknown"
+        review_state = rev.get("state") or ""
+        keep, reviewer_kind, severity = should_keep_review_item(
+            body, login, is_review_body=True, review_state=review_state
+        )
+        if not keep:
+            continue
+        rev_id = rev["id"]
+        rnode = iris.pr_review_body(repo_slug, pr_number, rev_id)
+        g.add((rnode, RDF.type, KG.Verification))
+        title_text = _first_line(_strip_badges(body))[:400] or str(rev_id)
+        g.add((rnode, DCTERMS.title, Literal(title_text, datatype=XSD.string)))
+        g.add((rnode, KG.fix, Literal(body[:400])))
+        submitted_at = rev.get("submitted_at") or ""
+        if submitted_at:
+            g.add((rnode, DCTERMS.created, Literal(submitted_at, datatype=XSD.dateTime)))
+        p = iris.person(login)
+        g.add((p, RDF.type, KG.BotAgent if _is_bot(login) else KG.Person))
+        g.add((p, KG.login, Literal(login)))
+        g.add((rnode, PROV.wasAttributedTo, p))
+        g.add((rnode, KG.about, pnode))
+        g.add((rnode, PROV.wasDerivedFrom, pnode))
+        g.add((rnode, PROV.wasGeneratedBy, run))
+        g.add((rnode, KG.reviewerLogin, Literal(login)))
+        g.add((rnode, KG.reviewerKind, Literal(reviewer_kind)))
+        g.add((rnode, KG.severity, Literal(severity)))
+        g.add((rnode, KG.reviewState, Literal(review_state)))
+        commit_id = rev.get("commit_id") or ""
+        if commit_id:
+            g.add((rnode, KG.commitId, Literal(commit_id)))
+        count += 1
+
+    stats["pr_review_items"] = stats.get("pr_review_items", 0) + count
+    return count
+
+
 def _bind(g: Graph) -> None:
-    g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
-    g.bind("dcterms", DCTERMS); g.bind("foaf", FOAF)
+    g.bind("kg", KG)
+    g.bind("kgr", iris.KGR)
+    g.bind("prov", PROV)
+    g.bind("dcterms", DCTERMS)
+    g.bind("foaf", FOAF)
 
 
 def _link_tracker(g: Graph, node: URIRef, text: str, stats: dict) -> None:
@@ -162,12 +340,14 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
               max_commits: int | None = 500, max_prs: int = 60,
               docs_url: str | None = None,
               doc_exclude: list[str] | None = None,
-              pipeline_ver: str = "0.1.0") -> dict:
+              pipeline_ver: str = "0.1.0",
+              history_branch: str | None = None) -> dict:
     """Populate `g` with spine triples. Returns a stats dict (with any caps applied)."""
     _bind(g)
     repo_path = Path(repo_path)
-    stats = {"files": 0, "commits": 0, "people": 0, "prs": 0, "pr_comments": 0,
-             "commit_cap": max_commits, "pr_cap": max_prs}
+    stats: dict[str, Any] = {"files": 0, "commits": 0, "people": 0, "prs": 0,
+                              "pr_comments": 0, "pr_review_items": 0,
+                              "commit_cap": max_commits, "pr_cap": max_prs}
     people: set[str] = set()
 
     # --- repo node ---
@@ -178,6 +358,32 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
     g.add((repo_iri, DCTERMS.title, Literal(repo_slug)))
     if docs_url:
         g.add((repo_iri, KG.docsUrl, Literal(docs_url)))
+
+    # --- history branch, snapshot ref, default-branch flag ---
+    if not history_branch:
+        try:
+            history_branch = _git(repo_path, "rev-parse", "--abbrev-ref", "HEAD").strip()
+        except Exception:
+            history_branch = "HEAD"
+    try:
+        snapshot_ref = _git(repo_path, "rev-parse", "HEAD").strip()
+    except Exception:
+        snapshot_ref = ""
+    is_default_branch = False
+    try:
+        default_branch = subprocess.run(
+            ["gh", "api", f"repos/{repo_slug}", "--jq", ".default_branch"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        is_default_branch = (history_branch == default_branch)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        pass
+    g.add((repo_iri, KG.historyBranch, Literal(history_branch)))
+    g.add((repo_iri, KG.isDefaultBranch, Literal(is_default_branch, datatype=XSD.boolean)))
+    if snapshot_ref:
+        g.add((repo_iri, KG.snapshotRef, Literal(snapshot_ref)))
+    stats["history_branch"] = history_branch
+    stats["is_default_branch"] = is_default_branch
 
     # --- files ---
     for rel in _git(repo_path, "ls-files").splitlines():
@@ -231,8 +437,20 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _link_tracker(g, c, subject, stats)
         people.add(login)
         stats["commits"] += 1
+        # History range for the refresh stats. Author dates carry their own offsets, so compare parsed values.
+        try:
+            when = datetime.fromisoformat(adate)
+        except ValueError:
+            when = None
+        if when is not None:
+            if "_first_commit" not in stats or when < stats["_first_commit"]:
+                stats["_first_commit"] = when
+                stats["first_commit_date"] = adate
+            if "_last_commit" not in stats or when > stats["_last_commit"]:
+                stats["_last_commit"] = when
+                stats["last_commit_date"] = adate
 
-    # --- pull requests (via gh, capped) ---
+    # --- pull requests (via gh REST API, paginated) ---
     if max_prs:
         _pr_run_id = iris.stable_run_id(pipeline_ver, repo_slug + ":pr-comments")
         _pr_run = _pr_comment_run_node(g, _pr_run_id, pipeline_ver)
@@ -240,19 +458,46 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _has_rate_limit_error = False
         try:
             raw = subprocess.run(
-                ["gh", "pr", "list", "--repo", repo_slug, "--state", "all",
-                 "--limit", str(max_prs), "--json",
-                 "number,title,author,state,mergedAt,body"],
+                ["gh", "api", "--paginate",
+                 f"repos/{repo_slug}/pulls?state=all&per_page=100"],
                 capture_output=True, text=True, check=True, cwd=str(repo_path),
             ).stdout
-            for pr in json.loads(raw):
+            all_prs, pr_pages = _parse_paginated_json(raw)
+            stats["prs_total"] = len(all_prs)
+            stats["pr_pages_fetched"] = pr_pages
+            prs_to_ingest = all_prs[:max_prs]
+            omitted = len(all_prs) - len(prs_to_ingest)
+            if omitted > 0:
+                stats["prs_omitted_reason"] = f"capped at {max_prs} (fetched {len(all_prs)} total)"
+
+            for pr in prs_to_ingest:
                 pnode = iris.pr(repo_slug, pr["number"])
                 g.add((pnode, RDF.type, KG.PullRequest))
                 g.add((pnode, KG.number, Literal(pr["number"], datatype=XSD.integer)))
                 g.add((pnode, DCTERMS.title, Literal(pr.get("title") or "")))
-                g.add((pnode, KG.state, Literal(pr.get("state") or "")))
+
+                # REST API: state "open"/"closed"; merged PRs are "closed" with merged_at set
+                merged_at = pr.get("merged_at")
+                if merged_at:
+                    g.add((pnode, KG.state, Literal("merged")))
+                    g.add((pnode, KG.mergedAt, Literal(merged_at, datatype=XSD.dateTime)))
+                else:
+                    g.add((pnode, KG.state, Literal(pr.get("state") or "")))
+
+                # base branch (REST: base.ref)
+                base_ref = (pr.get("base") or {}).get("ref") or ""
+                if base_ref:
+                    g.add((pnode, KG.baseRefName, Literal(base_ref)))
+
+                # link merged PR -> merge commit when that commit is in the graph
+                merge_sha = pr.get("merge_commit_sha")
+                if merge_sha and merged_at:
+                    commit_iri = iris.commit(repo_slug, merge_sha)
+                    if next(g.triples((commit_iri, None, None)), None) is not None:
+                        g.add((pnode, KG.mergeCommit, commit_iri))
+
                 g.add((pnode, KG.partOf, repo_iri))
-                login = (pr.get("author") or {}).get("login") or "unknown"
+                login = (pr.get("user") or {}).get("login") or "unknown"
                 p = iris.person(login)
                 g.add((p, RDF.type, KG.BotAgent if _is_bot(login) else KG.Person))
                 g.add((p, KG.login, Literal(login)))
@@ -271,7 +516,8 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                              f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
                             capture_output=True, text=True, check=True, cwd=str(repo_path),
                         ).stdout
-                        comments = json.loads(raw_c)[:_MAX_PR_COMMENTS]
+                        comments, _ = _parse_paginated_json(raw_c)
+                        comments = comments[:_MAX_PR_COMMENTS]
                         err_text = None
                         break
                     except (subprocess.CalledProcessError, json.JSONDecodeError,
@@ -296,6 +542,91 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
 
                 _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
 
+                # Fetch inline review comments (pulls/{n}/comments)
+                review_comments: list[dict] = []
+                rc_err: str | None = None
+                for _attempt in range(len(_RETRY_DELAYS) + 1):
+                    try:
+                        raw_rc = subprocess.run(
+                            ["gh", "api", "--paginate",
+                             f"repos/{repo_slug}/pulls/{pr['number']}/comments?per_page=50"],
+                            capture_output=True, text=True, check=True, cwd=str(repo_path),
+                        ).stdout
+                        review_comments, _ = _parse_paginated_json(raw_rc)
+                        if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
+                            print(
+                                f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
+                                f"{len(review_comments)} inline review comments; "
+                                f"capped at {_MAX_PR_REVIEW_ITEMS}"
+                            )
+                            review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
+                        rc_err = None
+                        break
+                    except (subprocess.CalledProcessError, json.JSONDecodeError,
+                            FileNotFoundError) as exc:
+                        stderr = getattr(exc, "stderr", None) or ""
+                        rc_err = stderr or str(exc)
+                        is_rate_limit = (
+                            "rate limit" in rc_err.lower() or "abuse" in rc_err.lower()
+                        )
+                        if is_rate_limit:
+                            _has_rate_limit_error = True
+                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
+                            m = re.search(r"retry.?after[:\s]+(\d+)", rc_err, re.IGNORECASE)
+                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
+                            time.sleep(wait)
+                        else:
+                            break
+                if rc_err is not None:
+                    _pr_errors.append(rc_err[:300])
+
+                # Fetch review bodies (pulls/{n}/reviews)
+                reviews: list[dict] = []
+                rv_err: str | None = None
+                for _attempt in range(len(_RETRY_DELAYS) + 1):
+                    try:
+                        raw_rv = subprocess.run(
+                            ["gh", "api", "--paginate",
+                             f"repos/{repo_slug}/pulls/{pr['number']}/reviews?per_page=50"],
+                            capture_output=True, text=True, check=True, cwd=str(repo_path),
+                        ).stdout
+                        reviews, _ = _parse_paginated_json(raw_rv)
+                        if len(reviews) > _MAX_PR_REVIEW_ITEMS:
+                            print(
+                                f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
+                                f"{len(reviews)} review bodies; "
+                                f"capped at {_MAX_PR_REVIEW_ITEMS}"
+                            )
+                            reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
+                        rv_err = None
+                        break
+                    except (subprocess.CalledProcessError, json.JSONDecodeError,
+                            FileNotFoundError) as exc:
+                        stderr = getattr(exc, "stderr", None) or ""
+                        rv_err = stderr or str(exc)
+                        is_rate_limit = (
+                            "rate limit" in rv_err.lower() or "abuse" in rv_err.lower()
+                        )
+                        if is_rate_limit:
+                            _has_rate_limit_error = True
+                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
+                            m = re.search(r"retry.?after[:\s]+(\d+)", rv_err, re.IGNORECASE)
+                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
+                            time.sleep(wait)
+                        else:
+                            break
+                if rv_err is not None:
+                    _pr_errors.append(rv_err[:300])
+
+                # Fetch thread states (best-effort; failure → 'unknown')
+                thread_states = _fetch_thread_states(repo_path, repo_slug, pr["number"])
+
+                _add_pr_review_content(
+                    g, _pr_run, repo_slug, pr["number"], pnode,
+                    review_comments, reviews, thread_states, stats,
+                )
+
+            stats["prs_ingested"] = stats["prs"]
             # Format and check error threshold after the PR loop.
             if _pr_errors:
                 stats["pr_comment_errors"] = (
@@ -310,4 +641,6 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
             stats["pr_error"] = str(e)[:200]
 
     stats["people"] = len(people)
+    stats.pop("_first_commit", None)
+    stats.pop("_last_commit", None)
     return stats

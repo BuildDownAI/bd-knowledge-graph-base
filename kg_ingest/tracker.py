@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from typing import Any
 
 import requests
 from rdflib import Graph, Literal, URIRef
@@ -45,6 +46,19 @@ _LEARNING_MARKERS = (
     "ai-implement-kg-refresh-learnings",
 )
 _DECISION_MIN_CHARS = 400
+
+# PR review content classification (KGB-47)
+_CODEX_REVIEW_MARKERS = frozenset([
+    "codex-code-review-finding:v1",
+    "codex-review-receipt:v1",
+    "codex-review-state:v1",
+])
+_AII_REVIEW_FINDING_MARKER = "<!-- ai-implement review-finding:v1 -->"
+_AII_REVIEW_BODY_MARKER = "<!-- ai-implement native-review -->"
+_REVIEW_APPROVAL_RE = re.compile(
+    r"^(lgtm|👍|looks good to me|thanks?!?|thank you!?|:thumbsup:|✅|shipit|:ship:|:\+1:)[\s!.,]*$",
+    re.IGNORECASE,
+)
 _SMOKE_JUMPER_HEADING = "## \U0001f525 Smoke-Jumper Report"
 # "AI Planning:" is always treated as a planning-note heading on the tracker
 # path (injected by _add_issue). comment_headings: in sources.yml adds extras.
@@ -95,8 +109,11 @@ query($team: String!, $after: String) {
 
 
 def _bind(g: Graph) -> None:
-    g.bind("kg", KG); g.bind("kgr", iris.KGR); g.bind("prov", PROV)
-    g.bind("dcterms", DCTERMS); g.bind("skos", SKOS)
+    g.bind("kg", KG)
+    g.bind("kgr", iris.KGR)
+    g.bind("prov", PROV)
+    g.bind("dcterms", DCTERMS)
+    g.bind("skos", SKOS)
 
 
 def _run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
@@ -181,7 +198,7 @@ def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str |
     # comments that merely mention it (keeps _classify aligned with _comment_title).
     # Use the raw first line (not _first_line) so the marker is detected even when
     # _first_line skips it (a one-word heading like `# ai-implement-build-up-learnings`).
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if any(m in raw_first_lower for m in _LEARNING_MARKERS):
         return "learning"
@@ -211,6 +228,103 @@ def _classify(body: str, *, headings: tuple = (), is_bot: bool = False) -> str |
     return None
 
 
+def _strip_markup(text: str) -> str:
+    """Return approximate plain text by removing markdown/HTML markup."""
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"`[^`]+`", "", text)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\*{1,3}|_{1,3}", "", text)
+    return text.strip()
+
+
+def _reviewer_kind(author_login: str, body: str) -> str:
+    """Return reviewer kind: 'codex', 'claude', 'ai-implement', 'human', 'other-bot'."""
+    ll = author_login.lower()
+    if ll == "chatgpt-codex-connector[bot]" or any(m in body for m in _CODEX_REVIEW_MARKERS):
+        return "codex"
+    if ll == "claude[bot]":
+        return "claude"
+    if ll == "github-actions[bot]" and (
+        "<!-- claude-review-verdict" in body or "claude review" in body.lower()
+    ):
+        return "claude"
+    if _AII_REVIEW_FINDING_MARKER in body or _AII_REVIEW_BODY_MARKER in body:
+        return "ai-implement"
+    is_bot = ll.endswith("[bot]") or ll.endswith("-bot") or "bot]" in ll
+    return "other-bot" if is_bot else "human"
+
+
+def _extract_severity(body: str, reviewer_kind: str, review_state: str = "") -> str:
+    """Extract severity label from body given reviewer kind."""
+    if reviewer_kind == "codex":
+        m = re.search(r"\b(P0|P1|P2)\b", body)
+        return m.group(1) if m else "unknown"
+    if reviewer_kind == "claude":
+        if "\U0001f534" in body:   # 🔴
+            return "blocking"
+        if "\U0001f7e1" in body:   # 🟡
+            return "warning"
+        m = re.search(r"severity[:\s]+(\w+)", body, re.IGNORECASE)
+        return m.group(1).lower() if m else "unknown"
+    if reviewer_kind == "ai-implement":
+        bl = body.lower()
+        if "[blocking]" in bl:
+            return "blocking"
+        if "[medium]" in bl:
+            return "medium"
+        if "[minor]" in bl:
+            return "minor"
+        return "unknown"
+    if reviewer_kind == "human" and review_state == "CHANGES_REQUESTED":
+        return "changes_requested"
+    return "unknown"
+
+
+def should_keep_review_item(
+    body: str,
+    author_login: str,
+    is_review_body: bool,
+    review_state: str = "",
+) -> tuple[bool, str, str]:
+    """Decide whether to keep a PR review item (inline comment or review body).
+
+    Returns (keep, reviewer_kind, severity).
+
+    Rules (KGB-47):
+    - Inline comment: keep when stripped text >= 20 chars, or body has a known bot marker.
+    - Review body: keep when stripped text >= 20 chars, state is CHANGES_REQUESTED, or known marker.
+    - Drop approval-only text (LGTM, 👍, etc.) in all cases.
+    - Drop AI-Implement status=start progress lines.
+    - Conversation comments keep the existing _classify_pr_comment rules (not handled here).
+    """
+    reviewer_kind = _reviewer_kind(author_login, body)
+    severity = _extract_severity(body, reviewer_kind, review_state)
+
+    if "<!-- ai-implement post-push status=start" in body:
+        return False, reviewer_kind, severity
+
+    plain = _strip_markup(body).strip()
+    if _REVIEW_APPROVAL_RE.match(plain):
+        return False, reviewer_kind, severity
+
+    has_marker = (
+        any(m in body for m in _CODEX_REVIEW_MARKERS)
+        or _AII_REVIEW_FINDING_MARKER in body
+        or _AII_REVIEW_BODY_MARKER in body
+        or "<!-- claude-review-verdict" in body
+    )
+
+    if is_review_body:
+        keep = len(plain) >= 20 or review_state == "CHANGES_REQUESTED" or has_marker
+    else:
+        keep = len(plain) >= 20 or has_marker
+
+    return keep, reviewer_kind, severity
+
+
 def _classify_pr_comment(body: str, author_login: str) -> str | None:
     """Classify a GitHub PR comment for ingest.
 
@@ -219,7 +333,7 @@ def _classify_pr_comment(body: str, author_login: str) -> str | None:
     """
     # Use raw first line for learning-marker detection so the marker is found even
     # when _first_line would skip it (e.g. `# ai-implement-kg-refresh-learnings`).
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if any(m in raw_first_lower for m in _LEARNING_MARKERS):
         return "learning"
@@ -248,7 +362,7 @@ def _comment_title(ident: str, issue_title: str, body: str, kind: str) -> str:
     Verification comments with an HTML orchestrator marker get "<ident> review: <first
     substantive line>" so the title is never just the HTML comment itself.
     """
-    raw_first = next((l.strip() for l in body.splitlines() if l.strip()), "")
+    raw_first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
     raw_first_lower = raw_first.lstrip("#").strip().lower()
     if kind == "learning" and any(m in raw_first_lower for m in _LEARNING_MARKERS):
         phase = ("build-down learnings" if "build-down" in raw_first_lower
@@ -331,8 +445,8 @@ def _add_issue(spine_g: Graph, run_g: Graph, run: URIRef, team: str,
     stats["issues"] += 1
 
     # ---- comments -> semantic layer (Learning / Decision / PlanningNote / Verification) ----
-    label_tags = [l["name"].lower() for l in (iss.get("labels") or {}).get("nodes", [])
-                  if l.get("name") and l["name"].lower() not in _LIFECYCLE_LABELS]
+    label_tags = [lbl["name"].lower() for lbl in (iss.get("labels") or {}).get("nodes", [])
+                  if lbl.get("name") and lbl["name"].lower() not in _LIFECYCLE_LABELS]
     _bot_users = bot_users or set()
     # comments may be a plain list (pipeline shape) or {"nodes": [...]} (GraphQL shape)
     _comments_raw = iss.get("comments") or []
@@ -401,9 +515,10 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
                 "(the graph would otherwise be silently empty). `source .env` first.")
     else:
         api_key = None
-    _bind(spine_g); _bind(run_g)
+    _bind(spine_g)
+    _bind(run_g)
     run = _run_node(run_g, run_id, pipeline_ver)
-    stats = {"teams": [], "issues": 0, "comment_learnings": 0,
+    stats: dict[str, Any] = {"teams": [], "issues": 0, "comment_learnings": 0,
              "comment_decisions": 0, "comment_planning_notes": 0,
              "comment_verifications": 0, "comment_implementation_notes": 0}
     cfg_data = cfg or sources.load()
@@ -436,6 +551,7 @@ def add_tracker(spine_g: Graph, run_g: Graph, repo_slug: str, run_id: str,
                       f"{missing_counts[name]}/{len(issues_override)} tracker-data records")
         stats["missing_fields"] = sorted(missing_counts)
     else:
+        assert api_key is not None  # set in the issues_override is None branch above
         for entry in sources.trackers(cfg_data):
             if entry.get("kind") != "linear":
                 continue

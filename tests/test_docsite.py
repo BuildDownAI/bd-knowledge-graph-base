@@ -8,7 +8,9 @@ import socketserver
 import threading
 import urllib.parse
 
-from kg_ingest.docsite import CrawlConfig, Page, Section, crawl_site, _parse_sitemap_xml
+import pytest
+
+from kg_ingest.docsite import CrawlConfig, Page, crawl_site, _parse_sitemap_xml
 
 # ---------------------------------------------------------------------------
 # Fixture HTML pages served by the local test server
@@ -55,10 +57,11 @@ _API = b"""<html><head><title>API Reference</title></head>
 <aside>Aside sidebar content Gamma</aside>
 </body></html>"""
 
-_SIMPLE = lambda title: (
-    f"<html><head><title>{title}</title></head>"
-    f"<body><h1>{title}</h1><p>{title} content.</p></body></html>"
-).encode()
+def _SIMPLE(title: str) -> bytes:
+    return (
+        f"<html><head><title>{title}</title></head>"
+        f"<body><h1>{title}</h1><p>{title} content.</p></body></html>"
+    ).encode()
 
 _ROBOTS = b"User-agent: *\nDisallow: /private/\n"
 
@@ -175,9 +178,21 @@ def _start_server() -> tuple[_FixtureServer, str]:
 
 
 # ---------------------------------------------------------------------------
+# pytest fixture: starts the local server and yields the base URL
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def base_url():
+    server, url = _start_server()
+    yield url
+    server.shutdown()
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.network
 def test_basic_crawl(base_url: str) -> None:
     """Every returned Page has non-empty required fields and sections."""
     cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=50)
@@ -198,6 +213,7 @@ def test_basic_crawl(base_url: str) -> None:
     print(f"PASS: test_basic_crawl ({len(pages)} pages)")
 
 
+@pytest.mark.network
 def test_heading_structure(base_url: str) -> None:
     """h1/h2/h3 tags produce sections with correct heading, level, and text."""
     cfg = CrawlConfig(root_url=f"{base_url}/install.html", delay=0.0, max_pages=1)
@@ -230,6 +246,7 @@ def test_heading_structure(base_url: str) -> None:
     print("PASS: test_heading_structure")
 
 
+@pytest.mark.network
 def test_content_isolation(base_url: str) -> None:
     """nav/footer/aside text is excluded; article content is preserved."""
     cfg = CrawlConfig(root_url=f"{base_url}/api.html", delay=0.0, max_pages=1)
@@ -252,6 +269,7 @@ def test_content_isolation(base_url: str) -> None:
     print("PASS: test_content_isolation")
 
 
+@pytest.mark.network
 def test_robots_disallow(base_url: str) -> None:
     """robots.txt Disallow: /private/ prevents fetching those pages."""
     cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=50)
@@ -264,6 +282,7 @@ def test_robots_disallow(base_url: str) -> None:
     print("PASS: test_robots_disallow")
 
 
+@pytest.mark.network
 def test_max_pages(base_url: str) -> None:
     """max_pages caps the result to at most that many pages."""
     cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=3)
@@ -274,6 +293,7 @@ def test_max_pages(base_url: str) -> None:
     print(f"PASS: test_max_pages (got {len(pages)} pages with max_pages=3)")
 
 
+@pytest.mark.network
 def test_exclude_pattern(base_url: str) -> None:
     """exclude glob prevents matching pages from being crawled."""
     cfg = CrawlConfig(
@@ -290,6 +310,7 @@ def test_exclude_pattern(base_url: str) -> None:
     print("PASS: test_exclude_pattern")
 
 
+@pytest.mark.network
 def test_robots_missing_allows_crawl(base_url: str) -> None:
     """When robots.txt returns 404, crawling is not blocked (allow all)."""
     # Temporarily remove robots.txt from the fixture so the server returns 404
@@ -307,6 +328,7 @@ def test_robots_missing_allows_crawl(base_url: str) -> None:
     print(f"PASS: test_robots_missing_allows_crawl ({len(pages)} pages)")
 
 
+@pytest.mark.network
 def test_include_pattern(base_url: str) -> None:
     """include glob restricts fetching to only matching paths.
 
@@ -344,6 +366,7 @@ def test_include_pattern(base_url: str) -> None:
     print(f"PASS: test_include_pattern ({len(pages)} pages)")
 
 
+@pytest.mark.network
 def test_content_hash_deterministic(base_url: str) -> None:
     """Same HTML content produces identical content_hash across two crawls."""
     cfg = CrawlConfig(root_url=base_url, delay=0.0, max_pages=1)
@@ -390,6 +413,7 @@ def test_sitemap_parsing() -> None:
     print("PASS: test_sitemap_parsing")
 
 
+@pytest.mark.network
 def test_sitemap_crawl(base_url: str) -> None:
     """Sitemap-mode: pages listed in sitemap.xml are fetched."""
     sitemap_content = (
@@ -413,6 +437,7 @@ def test_sitemap_crawl(base_url: str) -> None:
     print(f"PASS: test_sitemap_crawl ({len(pages)} pages via sitemap)")
 
 
+@pytest.mark.network
 def test_sparse_sitemap_falls_back_to_links(base_url: str) -> None:
     """A sitemap listing ONLY the root (Read-the-Docs style) must not suppress
     link-walking — linked pages are still discovered (KGB-5 smoke finding)."""
@@ -435,6 +460,7 @@ def test_sparse_sitemap_falls_back_to_links(base_url: str) -> None:
     print(f"PASS: test_sparse_sitemap_falls_back_to_links ({len(pages)} pages)")
 
 
+@pytest.mark.network
 def test_sphinx_headerlink_stripped(base_url: str) -> None:
     """Sphinx headerlink pilcrows are removed from heading text."""
     cfg = CrawlConfig(root_url=f"{base_url}/sphinx.html", delay=0.0, max_pages=1)
@@ -448,7 +474,6 @@ def test_sphinx_headerlink_stripped(base_url: str) -> None:
 
 def test_lazy_import() -> None:
     """Importing kg_ingest.docsite must not import bs4 at module level."""
-    import importlib
     import sys
 
     # Remove any cached import so we test the module's own top-level behaviour
@@ -468,6 +493,7 @@ def test_lazy_import() -> None:
     print("PASS: test_lazy_import")
 
 
+@pytest.mark.network
 def test_mkdocs_content_isolation(base_url: str) -> None:
     """MkDocs-style <article> inside a wrapper div: nav/footer stripped, article content kept."""
     cfg = CrawlConfig(root_url=f"{base_url}/mkdocs.html", delay=0.0, max_pages=1)
@@ -488,6 +514,7 @@ def test_mkdocs_content_isolation(base_url: str) -> None:
     print("PASS: test_mkdocs_content_isolation")
 
 
+@pytest.mark.network
 def test_missing_h1_fallback(base_url: str) -> None:
     """Page with no h1: title from <title> tag; sections extracted from h2+ headings."""
     cfg = CrawlConfig(root_url=f"{base_url}/no-h1.html", delay=0.0, max_pages=1)
@@ -504,6 +531,7 @@ def test_missing_h1_fallback(base_url: str) -> None:
     print("PASS: test_missing_h1_fallback")
 
 
+@pytest.mark.network
 def test_line_number_gutter_stripped(base_url: str) -> None:
     """Prism line-numbers gutter digits are not included in section text."""
     cfg = CrawlConfig(root_url=f"{base_url}/code.html", delay=0.0, max_pages=1)

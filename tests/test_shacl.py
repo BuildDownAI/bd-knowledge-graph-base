@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kg_ingest.iris import NAMESPACE as _NS
 from kg_ingest import ontology as _onto
-from rdflib import Graph, Literal, URIRef
+from rdflib import Graph, Literal
 from rdflib.namespace import RDF, XSD, Namespace
 from pyshacl import validate
 

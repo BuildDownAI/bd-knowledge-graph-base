@@ -14,22 +14,42 @@ Data path:    KG_DATA_DIR sets the default directory for both the graph (graph.t
 from __future__ import annotations
 
 import os
+import sys
+import threading
 
 from mcp.server.fastmcp import FastMCP
 
-from . import queries, semantic, hybrid
-from .store import Store, get_store
+from . import queries, semantic, hybrid, stardog_search
+from .store import Store, StardogRunStore, get_store
 
 mcp = FastMCP(os.environ.get("KG_SERVER_NAME", "kg"))
 
 _store: Store | None = None
+_store_lock: threading.Lock = threading.Lock()
 
 
 def store() -> Store:
     global _store
     if _store is None:
-        _store = get_store()
+        with _store_lock:
+            if _store is None:
+                _store = get_store()
     return _store
+
+
+def _warmup() -> None:
+    """Load the store and embeddings index in the background at HTTP start."""
+    try:
+        store()
+    except Exception as exc:
+        print(f"kg-query warm-up: store load failed: {exc}", file=sys.stderr)
+        return
+    npz = semantic.resolve_npz()
+    if npz.exists():
+        try:
+            semantic._load(npz)
+        except Exception as exc:
+            print(f"kg-query warm-up: embeddings load failed: {exc}", file=sys.stderr)
 
 
 @mcp.tool()
@@ -54,6 +74,8 @@ def kg_semantic_search(query: str, limit: int = 10) -> dict:
     kg_provenance for full content. Requires the embeddings sidecar (build with
     `python -m kg_ingest.embed`); returns a friendly error if absent. Read-only.
     """
+    if os.environ.get("KG_BACKEND", "").lower() == "stardog_run":
+        return stardog_search.semantic_search(store(), query, limit)
     return semantic.semantic_search(query, limit, npz_path=semantic.resolve_npz())
 
 
@@ -69,7 +91,10 @@ def kg_hybrid_search(query: str, limit: int = 10) -> dict:
     Prefer this over `kg_search`/`kg_semantic_search` unless you specifically need
     exact-only or vector-only. Read-only.
     """
-    return hybrid.hybrid_search(store(), query, limit, npz_path=semantic.resolve_npz())
+    s = store()
+    if isinstance(s, StardogRunStore):
+        return stardog_search.hybrid_search(s, query, limit)
+    return hybrid.hybrid_search(s, query, limit, npz_path=semantic.resolve_npz())
 
 
 @mcp.tool()
@@ -100,6 +125,28 @@ def kg_path(from_iri: str, to_iri: str, max_len: int = 4) -> dict:
     return queries.kg_path(store(), from_iri, to_iri, max_len)
 
 
+@mcp.tool()
+def kg_repo_history(repo: str, branch: str | None = None, since: str | None = None,
+                    until: str | None = None, pr: int | None = None,
+                    kind: str | None = None, limit: int = 100) -> dict:
+    """Return commits and/or merged PRs for a repository, with optional filters.
+
+    repo:   owner/name slug of the repository (required)
+    branch: filter commits by the repo's history branch; filter PRs by base branch
+    since:  ISO date lower bound (inclusive) on commit date / PR merge date
+    until:  ISO date upper bound (inclusive) on commit date / PR merge date
+    pr:     return only the PR with this number
+    kind:   "commit", "pr", or omit for both
+    limit:  max results (default 100)
+
+    Returns {repo, count, results} where each result has type, iri, title, and
+    type-specific fields (sha/date for commits; number/state/base_ref for PRs).
+    Read-only.
+    """
+    return queries.kg_repo_history(store(), repo, branch=branch, since=since,
+                                   until=until, pr=pr, kind=kind, limit=limit)
+
+
 def main() -> None:
     # Opt-in streamable-HTTP sidecar mode. When KG_HTTP is set, the server binds
     # HTTP (loopback by default — privacy by placement, for an in-machine proxy
@@ -119,6 +166,7 @@ def main() -> None:
         # lower bound; the upper bound is the last version this was tested on.
         mcp.settings.stateless_http = True
         mcp.settings.json_response = True
+        threading.Thread(target=_warmup, daemon=True, name="kg-warmup").start()
         mcp.run(transport="streamable-http")
     else:
         mcp.run()  # stdio transport (default)

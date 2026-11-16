@@ -6,6 +6,7 @@ learning-id collisions across repos/stores are impossible (recon §2.3/§5.7).
 from __future__ import annotations
 
 import hashlib
+import os
 from urllib.parse import quote
 
 from rdflib import Namespace, URIRef
@@ -19,6 +20,9 @@ DEFAULT_NAMESPACE = "https://example.org/kg/"
 
 
 def _namespace() -> str:
+    env_ns = os.environ.get("KG_NAMESPACE", "").strip()
+    if env_ns:
+        return env_ns if env_ns.endswith("/") else env_ns + "/"
     try:
         ns = str(sources.load().get("namespace") or DEFAULT_NAMESPACE)
     except FileNotFoundError:
@@ -81,6 +85,16 @@ def comment(issue_identifier: str, ordinal: int) -> URIRef:
 
 def pr_comment(repo_slug: str, pr_number: int | str, comment_id: int | str) -> URIRef:
     return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/comment/{comment_id}")
+
+
+def pr_review_comment(repo_slug: str, pr_number: int | str, comment_id: int | str) -> URIRef:
+    # Separate path segment from issue-comment IDs — GitHub's inline review comment
+    # IDs live in a different integer space but could overlap numerically.
+    return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/review-comment/{comment_id}")
+
+
+def pr_review_body(repo_slug: str, pr_number: int | str, review_id: int | str) -> URIRef:
+    return URIRef(f"{KGR}pr/{_seg(repo_slug)}/{pr_number}/review-body/{review_id}")
 
 
 def project(name: str) -> URIRef:

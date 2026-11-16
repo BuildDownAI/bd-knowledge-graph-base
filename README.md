@@ -23,7 +23,7 @@ a `knowledge-graph-<your-project>` repo in minutes.
   reciprocal rank fusion — robust to exact IDs *and* paraphrases.
 - **A read-only MCP server** exposing `kg_hybrid_search` (preferred),
   `kg_search`, `kg_semantic_search`, `kg_neighbors`, `kg_provenance`, `kg_path`
-  (HTTP mode is stateless by design — the orchestrator proxies each call as a single POST with no session).
+  (HTTP mode is stateless by design — the orchestrator proxies each call as a single POST with no session; in HTTP mode the server loads the graph and embeddings index in the background at start so the first tool call does not pay the cold-load cost).
 - **Git-diffable snapshots**: the binary graph stays untracked; a compact
   `snapshot/` digest + per-type parts make data changes reviewable in git.
 
@@ -68,13 +68,38 @@ and `PYTHONPATH=.` is no longer needed anywhere.
 
 Each `code_repo` and `secondary_repos[]` entry in `sources.yml` accepts an optional `doc_exclude` field (a list of repo-relative path globs) to suppress specific files from being ingested as `kg:Doc` nodes — useful when a repo keeps duplicate doc copies (e.g., `stable/` and `latest/`) and you only want one indexed.
 
+Each entry also accepts an optional `branch` field to pin the history branch read from the clone. When omitted, the clone's current `HEAD` branch is recorded. The ingest checks whether that branch is the repository's GitHub default branch and records the flag on the `kg:Repo` node.
+
+### Repo history fields (KGB-42)
+
+Every `kg:Repo` node now carries:
+- `kg:historyBranch` — the branch the clone was read from (sources.yml `branch:`, else git `HEAD`)
+- `kg:isDefaultBranch` — `true` when the history branch equals the GitHub default branch
+- `kg:snapshotRef` — the full SHA of `HEAD` at ingest time
+
+Every `kg:PullRequest` node now carries:
+- `kg:baseRefName` — the target branch of the PR
+- `kg:mergedAt` — merge timestamp (`xsd:dateTime`), when merged
+- `kg:mergeCommit` — link to the `kg:Commit` node for the merge commit, when that commit is in the ingested history
+
+### PR ingest cap and stats (KGB-42)
+
+PR ingest pages past the previous 200-record silent cap using `gh api --paginate`. A `--max-prs` cap is still enforced, but it is now **reported**: the stats include `prs_total`, `prs_ingested`, and `prs_omitted_reason` when any PRs were dropped.
+
+Repos listed more than once across `code_repo`, `secondary_repos`, and `self_ingest` are deduplicated by slug: the first occurrence wins and repeats are recorded in `ai-output/source-results.json` as `skipped` with reason `duplicate of <first source>`.
+
+### History search (KGB-42)
+
+`kg_repo_history(repo, branch?, since?, until?, pr?, kind?, limit?)` — new MCP tool that returns commits and/or merged PRs for a repo. Filter by branch, date range, or a specific PR number. Also findable via `kg_search`: PR titles and repo names now match keyword queries.
+
 ## Layout
 
 ```
 sources.yml            # THE source manifest (edit this first; includes namespace)
+                       # Set KG_NAMESPACE env var to override namespace: in sources.yml.
 ontology/              # kg.ttl (classes/predicates) + shapes.ttl (SHACL provenance invariant)
 kg_ingest/             # spine + semantic + tracker ingesters, embeddings, snapshot writer
-kg_query/              # store seam (rdflib|Stardog), read tools, hybrid search, MCP server
+kg_query/              # store seam (rdflib|Stardog|StardogRunStore), read tools, hybrid search, MCP server
 docs/design/           # how the ingest works, semantic + hybrid search design
 learnings/             # the improvement loop's inbox — accept / decline / defer, see CONTRIBUTING.md
 tests/                 # mechanical validation: SHACL invariant, tools, search
@@ -124,6 +149,43 @@ clear error** if any file exceeds **95 MB** (e.g. a single subject whose triples
 the cap, or `embeddings.npz` growing unexpectedly). This fires before the push so
 GitHub never sees the oversized file.
 
+## Serving from Stardog Run
+
+Set `KG_BACKEND=stardog_run` to serve queries from a [Stardog Run](https://www.stardog.com/stardog-run/)
+serverless endpoint instead of a local graph file.
+
+| Variable | Meaning |
+| -- | -- |
+| `KG_BACKEND=stardog_run` | Selects this store |
+| `KG_STARDOG_RUN_TOKEN` | Run API token. Required |
+| `KG_STARDOG_DB` | Database name. Required |
+| `KG_STARDOG_RUN_ENDPOINT` | Endpoint name. Optional; necessary only if the token lists more than one endpoint |
+| `KG_STARDOG_DATASET` | IRI sent as `default-graph-uri`. Optional; not set means the database default graph |
+| `KG_STARDOG_RUN_CONSOLE` | Console URL. Optional; default `https://console.stardog.run` |
+
+**Billing and wake:** Every query request to Stardog Run is billed. An inactive endpoint wakes
+on the first token-exchange request (`POST /api/token`) and may take up to 2 minutes; the store
+retries that call for up to 5 minutes before raising.
+
+**Dataset alias:** For a Knowledge Graph installed via the Stardog catalog, the database default
+graph is empty. Set `KG_STARDOG_DATASET` to the alias graph, for example
+`tag:stardog:kit:alias:builddown_kg`. Without it, all queries return empty results.
+
+**Semantic and hybrid search:** When `KG_BACKEND=stardog_run`, `kg_semantic_search` and
+`kg_hybrid_search` run entirely inside the database using Stardog's semantic FTS index —
+no `embeddings.npz` is read and no local embedding model is loaded. The graph must have the
+card predicates (`kg:cardText`, `kg:cardTitle`, `kg:cardType`, `kg:cardSnippet`) written by
+the publish step; without them, search returns empty results. The lexical leg of
+`kg_hybrid_search` matches the same six node types as `kg_search`: Learning, Decision,
+ImplementationNote, PlanningNote, PullRequest, and Repo.
+
+**Creating a token:** Open the endpoint's detail page in the Stardog Run console, go to
+"Endpoint API tokens", and create a token. Or use the CLI:
+
+```bash
+sd api-token create --endpoint NAME --name kg --days 90
+```
+
 ## Host sizing
 
 `kg_ingest.materialize` loads every `snapshot/parts/*.nt` into one in-memory rdflib
@@ -139,6 +201,22 @@ the path that runs on them:
 
 Materialize prints its peak RSS on every run; when a refresh dies with a bare
 "Command failed" and the host log shows an OOM kill, that line is the number to size against.
+
+## Running the tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Network-dependent tests (HTTP server smoke, docsite crawler, MCP source) are skipped by
+default. To run them:
+
+```bash
+KG_TEST_NETWORK=1 pytest
+```
+
+Run a single file: `pytest tests/test_query.py -v`
 
 ## Improving the base — the learnings loop
 
