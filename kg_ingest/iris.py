@@ -6,6 +6,7 @@ learning-id collisions across repos/stores are impossible (recon §2.3/§5.7).
 from __future__ import annotations
 
 import hashlib
+import os
 from urllib.parse import quote
 
 from rdflib import Namespace, URIRef
@@ -19,6 +20,9 @@ DEFAULT_NAMESPACE = "https://example.org/kg/"
 
 
 def _namespace() -> str:
+    env_ns = os.environ.get("KG_NAMESPACE", "").strip()
+    if env_ns:
+        return env_ns if env_ns.endswith("/") else env_ns + "/"
     try:
         ns = str(sources.load().get("namespace") or DEFAULT_NAMESPACE)
     except FileNotFoundError:
