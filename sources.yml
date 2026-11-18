@@ -121,3 +121,22 @@ secondary_repos: []
 #  - name: "GBrain Vault"
 #    command: ["npx", "@gbrain/mcp-server", "--vault", "/path/to/vault"]
 #    max_resources: 500
+
+# ---- STARDOG PACKAGE: metadata for the kg-ingest package command (KGB-57) -----
+# The orchestrator overwrites `name` and `label` per deployment (AII-1987).
+# `alias` is derived automatically: name with `-` changed to `_`.
+knowledge_graph:
+  group: builddown          # Stardog catalog group (org-level namespace)
+  name: base-kg             # Kit name; orchestrator writes the deployment name here
+  version: 0.1.0            # Kit version string
+  label: Base Knowledge Graph  # Human-readable label; orchestrator writes the deployment label here
+  description: |
+    A knowledge graph built from code repository history, documentation, and issue tracker data.
+    Provides semantic search and question-answering over the project's engineering record.
+  questions:                # Sample questions shown on the chat home screen (up to 10 shown)
+    - What decisions shaped the current architecture?
+    - Which issues are related to authentication?
+    - What learnings exist about performance problems?
+  key_classes:              # Class names from ontology/kg.ttl shown in the catalog description
+    - Issue
+    - Commit
