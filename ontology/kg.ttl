@@ -91,6 +91,7 @@ kg:touches    a owl:ObjectProperty ; rdfs:label "touches (file)" ;
     schema:domainIncludes kg:Commit, kg:PullRequest ;
     schema:rangeIncludes  kg:File .
 
+# Not written by the ingest yet.
 kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" ;
     schema:domainIncludes kg:Person ;
     schema:rangeIncludes  kg:PullRequest .
