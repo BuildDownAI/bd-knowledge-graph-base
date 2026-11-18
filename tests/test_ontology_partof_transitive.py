@@ -7,8 +7,9 @@ from rdflib import URIRef
 from rdflib.namespace import OWL, RDF
 
 from kg_ingest import ontology as _onto
+from kg_ingest.iris import KG as KG_NS
 
-KG = "https://example.org/kg/onto#"
+KG = str(KG_NS)
 SCHEMA = "https://schema.org/"
 DI = URIRef(SCHEMA + "domainIncludes")
 RI = URIRef(SCHEMA + "rangeIncludes")
@@ -135,11 +136,11 @@ def test_schema_hints_match_reference():
     extra = actual - EXPECTED_SCHEMA_TRIPLES
     missing = EXPECTED_SCHEMA_TRIPLES - actual
 
-    assert not extra, f"Unexpected schema: triples in ontology:\n" + "\n".join(
-        f"  {s}  {p}  {o}" for s, p, o in sorted(str(t) for t in extra)
+    assert not extra, "Unexpected schema: triples in ontology:\n" + "\n".join(
+        f"  {t}" for t in sorted(str(t) for t in extra)
     )
-    assert not missing, f"Missing schema: triples from reference list:\n" + "\n".join(
-        f"  {s}  {p}  {o}" for s, p, o in sorted(str(t) for t in missing)
+    assert not missing, "Missing schema: triples from reference list:\n" + "\n".join(
+        f"  {t}" for t in sorted(str(t) for t in missing)
     )
 
 
