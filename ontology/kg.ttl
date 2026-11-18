@@ -83,31 +83,41 @@ kg:notes        a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:ran
 ########################  SPINE PREDICATES  ########################
 
 kg:partOf     a owl:ObjectProperty, owl:TransitiveProperty ; rdfs:label "part of" ;
-    schema:domainIncludes kg:File, kg:Doc, kg:Commit, kg:PullRequest, kg:DocPage, kg:DocSection, kg:Issue ;
-    schema:rangeIncludes  kg:Repo, kg:DocSite, kg:DocPage, kg:McpSource, kg:Issue .
+    schema:domainIncludes kg:Commit, kg:DocPage, kg:DocSection, kg:File, kg:Issue, kg:PullRequest ;
+    schema:rangeIncludes  kg:DocPage, kg:DocSite, kg:Issue, kg:Repo .
 
 # Not written by the ingest yet.
 kg:touches    a owl:ObjectProperty ; rdfs:label "touches (file)" ;
-    schema:domainIncludes kg:Commit, kg:PullRequest ;
     schema:rangeIncludes  kg:File .
 
-# Not written by the ingest yet.
-kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" ;
-    schema:domainIncludes kg:Person ;
-    schema:rangeIncludes  kg:PullRequest .
+kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" .
 
 kg:references a owl:ObjectProperty ; rdfs:label "references" ;
     schema:domainIncludes kg:Commit, kg:PullRequest ;
     schema:rangeIncludes  kg:Issue .
 
-kg:sourceSystem a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:sourceId     a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:contentHash  a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:sourceSystem a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue, kg:Repo ;
+    rdfs:range xsd:string .
+kg:sourceId     a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Commit, kg:Repo ;
+    rdfs:range xsd:string .
+kg:contentHash  a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocPage ;
+    rdfs:range xsd:string .
 kg:uri          a owl:DatatypeProperty ; rdfs:range xsd:anyURI .
-kg:path         a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:login        a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:number       a owl:DatatypeProperty ; rdfs:range xsd:integer .
-kg:state        a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:path         a owl:DatatypeProperty ;
+    schema:domainIncludes kg:File ;
+    rdfs:range xsd:string .
+kg:login        a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Person ;
+    rdfs:range xsd:string .
+kg:number       a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue, kg:PullRequest ;
+    rdfs:range xsd:integer .
+kg:state        a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue, kg:PullRequest ;
+    rdfs:range xsd:string .
 
 # Repository history metadata (KGB-42)
 kg:historyBranch   a owl:DatatypeProperty ; rdfs:domain kg:Repo ; rdfs:range xsd:string .
@@ -120,21 +130,47 @@ kg:mergedAt     a owl:DatatypeProperty ; rdfs:domain kg:PullRequest ; rdfs:range
 kg:mergeCommit  a owl:ObjectProperty ; rdfs:domain kg:PullRequest ; rdfs:range kg:Commit .
 
 # Doc-site spine predicates (KGB-4)
-kg:docsUrl          a owl:DatatypeProperty ; rdfs:range xsd:string .  # Repo -> documentation root URL
-kg:rootUrl          a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSite root URL
-kg:url              a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocPage full URL
-kg:anchor           a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSection heading anchor slug
-kg:heading          a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSection heading text
-kg:level            a owl:DatatypeProperty ; rdfs:range xsd:integer . # DocSection heading level (1–4)
-kg:documentsBranch  a owl:DatatypeProperty ; rdfs:range xsd:string .  # DocSite: code branch this docs version documents (KGB-5)
-kg:mcpServer        a owl:DatatypeProperty ; rdfs:range xsd:string .  # McpSource server name/endpoint (KGB-12)
+kg:docsUrl          a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Repo ;
+    rdfs:range xsd:string .  # Repo -> documentation root URL
+kg:rootUrl          a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSite ;
+    rdfs:range xsd:string .  # DocSite root URL
+kg:url              a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocPage ;
+    rdfs:range xsd:string .  # DocPage full URL
+kg:anchor           a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSection ;
+    rdfs:range xsd:string .  # DocSection heading anchor slug
+kg:heading          a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSection ;
+    rdfs:range xsd:string .  # DocSection heading text
+kg:level            a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSection ;
+    rdfs:range xsd:integer . # DocSection heading level (1–4)
+kg:documentsBranch  a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSite ;
+    rdfs:range xsd:string .  # DocSite: code branch this docs version documents (KGB-5)
+kg:mcpServer        a owl:DatatypeProperty ;
+    schema:domainIncludes kg:McpSource ;
+    rdfs:range xsd:string .  # McpSource server name/endpoint (KGB-12)
 
 # --- tracker (Linear/Jira) spine ---
-kg:trackerKey   a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII-256"
-kg:trackerTeam  a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII"
-kg:description  a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:label        a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw tracker label
-kg:branchName   a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:trackerKey   a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue ;
+    rdfs:range xsd:string .  # "AII-256"
+kg:trackerTeam  a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue ;
+    rdfs:range xsd:string .  # "AII"
+kg:description  a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue ;
+    rdfs:range xsd:string .
+kg:label        a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue ;
+    rdfs:range xsd:string .  # raw tracker label
+kg:branchName   a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Issue ;
+    rdfs:range xsd:string .
 kg:inProject    a owl:ObjectProperty ;           # issue -> project
     schema:domainIncludes kg:Issue ;
     schema:rangeIncludes  kg:Project .
@@ -143,32 +179,26 @@ kg:relatedTo    a owl:ObjectProperty ;           # issue <-> issue (Linear "rela
     schema:rangeIncludes  kg:Issue .
 kg:addressedBy  a owl:ObjectProperty ;           # issue -> pr / commit (loop to code)
     schema:domainIncludes kg:Issue ;
-    schema:rangeIncludes  kg:PullRequest, kg:Commit .
+    schema:rangeIncludes  kg:Commit, kg:PullRequest .
 
 ######################  SEMANTIC PREDICATES  ######################
 
 # learning <-> learning / doc typed relations (recon §2.4 pre-built edge set)
-kg:supersedes     a owl:ObjectProperty ; rdfs:label "supersedes" ;
-    schema:domainIncludes kg:Learning ;
-    schema:rangeIncludes  kg:Learning .
-kg:supersededBy   a owl:ObjectProperty ; owl:inverseOf kg:supersedes ;
-    schema:domainIncludes kg:Learning ;
-    schema:rangeIncludes  kg:Learning .
+kg:supersedes     a owl:ObjectProperty ; rdfs:label "supersedes" .
+kg:supersededBy   a owl:ObjectProperty ; owl:inverseOf kg:supersedes .
 kg:duplicateOf    a owl:ObjectProperty ;
     schema:domainIncludes kg:Issue ;
     schema:rangeIncludes  kg:Issue .
-kg:recurrenceOf   a owl:ObjectProperty ;
-    schema:domainIncludes kg:Learning ;
-    schema:rangeIncludes  kg:Learning .
+kg:recurrenceOf   a owl:ObjectProperty .
 # Not written by the ingest yet.
 kg:resolvedBy     a owl:ObjectProperty ;          # learning -> pr/commit
     schema:domainIncludes kg:Learning ;
-    schema:rangeIncludes  kg:PullRequest, kg:Commit .
+    schema:rangeIncludes  kg:Commit, kg:PullRequest .
 kg:regressedBy    a owl:ObjectProperty ;          # learning -> pr/commit
     schema:domainIncludes kg:Learning ;
-    schema:rangeIncludes  kg:PullRequest, kg:Commit .
+    schema:rangeIncludes  kg:Commit, kg:PullRequest .
 kg:filedAs        a owl:ObjectProperty ;          # learning -> issue/ticket
-    schema:domainIncludes kg:Learning ;
+    schema:domainIncludes kg:Decision, kg:Learning ;
     schema:rangeIncludes  kg:Issue .
 kg:relatedPr      a owl:ObjectProperty ;          # learning -> pr
     schema:domainIncludes kg:Learning ;
@@ -180,9 +210,11 @@ kg:relatedSolution a owl:ObjectProperty ;         # doc -> doc
 kg:affectsFile    a owl:ObjectProperty ;          # learning -> file
     schema:domainIncludes kg:Learning ;
     schema:rangeIncludes  kg:File .
-kg:affectsComponent a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw "file:func"
+kg:affectsComponent a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .  # raw "file:func"
 kg:tagged         a owl:ObjectProperty ; rdfs:label "tagged" ;        # node -> Topic
-    schema:domainIncludes kg:Learning, kg:Decision, kg:Issue ;
+    schema:domainIncludes kg:Issue, kg:SemanticNode ;
     schema:rangeIncludes  kg:Topic .
 kg:dependsOn      a owl:ObjectProperty ;          # issue -> issue (todo dependencies)
     schema:domainIncludes kg:Issue ;
@@ -192,24 +224,52 @@ kg:aboutLearning  a owl:ObjectProperty ;          # StatusUpdate -> Learning
     schema:rangeIncludes  kg:Learning .
 
 # learning scalar properties (normalized frontmatter core, recon §2.1)
-kg:learningId  a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:status      a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:category    a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:priority    a owl:DatatypeProperty ; rdfs:range xsd:string .   # P0..P3
-kg:severityLevel a owl:DatatypeProperty ; rdfs:range xsd:string . # critical/high/medium/low
-kg:symptom     a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:rootCause   a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:impact      a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:fix         a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:foundDate   a owl:DatatypeProperty ; rdfs:range xsd:date .
-kg:problemType a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:resolutionType a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:detail      a owl:DatatypeProperty ; rdfs:range xsd:string .  # long prose body (comment learnings)
+kg:learningId  a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:status      a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Decision, kg:Issue, kg:Learning ;
+    rdfs:range xsd:string .
+kg:category    a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:priority    a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .   # P0..P3
+kg:severityLevel a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string . # critical/high/medium/low
+kg:symptom     a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:rootCause   a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:impact      a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:fix         a owl:DatatypeProperty ;
+    schema:domainIncludes kg:SemanticNode ;
+    rdfs:range xsd:string .
+kg:foundDate   a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:date .
+kg:problemType a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:resolutionType a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Learning ;
+    rdfs:range xsd:string .
+kg:detail      a owl:DatatypeProperty ;
+    schema:domainIncludes kg:Doc, kg:DocPage, kg:SemanticNode ;
+    rdfs:range xsd:string .  # long prose body (comment learnings)
 
 # retrieval
 kg:ofNode      a owl:ObjectProperty ; rdfs:domain kg:Chunk .
 kg:ordinal     a owl:DatatypeProperty ; rdfs:domain kg:Chunk ; rdfs:range xsd:integer .
-kg:text        a owl:DatatypeProperty ; rdfs:range xsd:string .
+kg:text        a owl:DatatypeProperty ;
+    schema:domainIncludes kg:DocSection ;
+    rdfs:range xsd:string .
 kg:confidence  a owl:DatatypeProperty ; rdfs:range xsd:decimal .  # RDF-star annotation on extracted edges
 
 # PR review content properties (KGB-47) — used on kg:Verification nodes for inline
