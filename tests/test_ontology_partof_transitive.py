@@ -3,6 +3,7 @@
 Loads the ontology via kg_ingest.ontology.load (the namespace-substitution path)
 so that any regression introduced by the new @prefix schema: line is caught here.
 """
+from rdflib import URIRef
 from rdflib.namespace import OWL, RDF
 
 from kg_ingest import ontology as _onto
@@ -10,7 +11,6 @@ from kg_ingest import ontology as _onto
 
 def test_partof_is_transitive_property():
     g = _onto.load("kg.ttl")
-    onto_ns = str(next(iter(g.namespaces()))[1])  # pick any to confirm graph loaded
     assert len(g) > 0, "ontology graph should not be empty"
 
     # Locate kg:partOf IRI from the graph bindings
@@ -18,7 +18,6 @@ def test_partof_is_transitive_property():
     assert kg_ns is not None, "kg prefix must be bound in ontology/kg.ttl"
     part_of = kg_ns + "partOf"
 
-    from rdflib import URIRef
     assert (URIRef(part_of), RDF.type, OWL.TransitiveProperty) in g, (
         "kg:partOf must be declared owl:TransitiveProperty"
     )
