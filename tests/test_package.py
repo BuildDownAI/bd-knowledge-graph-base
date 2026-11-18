@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import socket
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -96,8 +95,6 @@ def test_missing_database_flag(tmp_path):
 
 def test_no_network_call(tmp_path, monkeypatch):
     """build_package must make no outbound network connection."""
-    original_connect = socket.socket.connect
-
     def _fail_connect(self, address):
         raise OSError(f"network calls are forbidden in package; tried to connect to {address}")
 
