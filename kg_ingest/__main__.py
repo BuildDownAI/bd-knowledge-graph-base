@@ -3,12 +3,14 @@
 Subcommands wrap the existing modules, which all stay runnable directly via
 `python -m kg_ingest.<module>`:
 
-  kg-ingest refresh [flags]  one-command ingest from sources.yml (kg_ingest.cli)
-  kg-ingest build [flags]    full ingest -> out/graph.trig + snapshot/ (kg_ingest.cli)
-  kg-ingest embed            rebuild only the embeddings sidecar (kg_ingest.embed)
-  kg-ingest snapshot         regenerate snapshot/ from out/graph.trig (kg_ingest.snapshot)
-  kg-ingest materialize      reconstitute out/graph.trig from snapshot/ (kg_ingest.materialize)
-  kg-ingest guard [flags]    evaluate snapshot/parts line-count changes (kg_ingest.guard)
+  kg-ingest refresh [flags]           one-command ingest from sources.yml (kg_ingest.cli)
+  kg-ingest build [flags]             full ingest -> out/graph.trig + snapshot/ (kg_ingest.cli)
+  kg-ingest embed                     rebuild only the embeddings sidecar (kg_ingest.embed)
+  kg-ingest snapshot                  regenerate snapshot/ from out/graph.trig (kg_ingest.snapshot)
+  kg-ingest materialize               reconstitute out/graph.trig from snapshot/ (kg_ingest.materialize)
+  kg-ingest guard [flags]             evaluate snapshot/parts line-count changes (kg_ingest.guard)
+  kg-ingest package --out <dir> --database <name>
+                                      build Stardog KG package from snapshot/parts/ (kg_ingest.package)
 
 `kg-ingest --repo ...` without a subcommand is shorthand for `build`.
 Run `kg-ingest <subcommand> -h` for that subcommand's flags.
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 import sys
 
-_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize", "refresh", "guard")
+_SUBCOMMANDS = ("build", "embed", "snapshot", "materialize", "refresh", "guard", "package")
 
 
 def main(argv=None) -> int:
@@ -45,6 +47,10 @@ def main(argv=None) -> int:
     if cmd == "materialize":
         from . import materialize
         return materialize.main(rest) or 0
+    if cmd == "package":
+        from . import package
+        package.main(rest)
+        return 0
     from . import guard
     return guard.main(rest) or 0
 
