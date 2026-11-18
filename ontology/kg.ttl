@@ -7,6 +7,7 @@
 @prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
 @prefix foaf:    <http://xmlns.com/foaf/0.1/> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix schema:  <https://schema.org/> .
 
 #################################################################
 # AI-Implement Knowledge Graph — ontology (Phase 1)
@@ -81,10 +82,22 @@ kg:notes        a owl:DatatypeProperty ; rdfs:domain kg:ExtractionRun ; rdfs:ran
 
 ########################  SPINE PREDICATES  ########################
 
-kg:partOf     a owl:ObjectProperty ; rdfs:label "part of" .
-kg:touches    a owl:ObjectProperty ; rdfs:label "touches (file)" .
-kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" .
-kg:references a owl:ObjectProperty ; rdfs:label "references" .
+kg:partOf     a owl:ObjectProperty, owl:TransitiveProperty ; rdfs:label "part of" ;
+    schema:domainIncludes kg:File, kg:Doc, kg:Commit, kg:PullRequest, kg:DocPage, kg:DocSection, kg:Issue ;
+    schema:rangeIncludes  kg:Repo, kg:DocSite, kg:DocPage, kg:McpSource, kg:Issue .
+
+# Not written by the ingest yet.
+kg:touches    a owl:ObjectProperty ; rdfs:label "touches (file)" ;
+    schema:domainIncludes kg:Commit, kg:PullRequest ;
+    schema:rangeIncludes  kg:File .
+
+kg:reviews    a owl:ObjectProperty ; rdfs:label "reviews" ;
+    schema:domainIncludes kg:Person ;
+    schema:rangeIncludes  kg:PullRequest .
+
+kg:references a owl:ObjectProperty ; rdfs:label "references" ;
+    schema:domainIncludes kg:Commit, kg:PullRequest ;
+    schema:rangeIncludes  kg:Issue .
 
 kg:sourceSystem a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:sourceId     a owl:DatatypeProperty ; rdfs:range xsd:string .
@@ -121,27 +134,61 @@ kg:trackerTeam  a owl:DatatypeProperty ; rdfs:range xsd:string .  # "AII"
 kg:description  a owl:DatatypeProperty ; rdfs:range xsd:string .
 kg:label        a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw tracker label
 kg:branchName   a owl:DatatypeProperty ; rdfs:range xsd:string .
-kg:inProject    a owl:ObjectProperty .          # issue -> project
-kg:relatedTo    a owl:ObjectProperty .          # issue <-> issue (Linear "related")
-kg:addressedBy  a owl:ObjectProperty .          # issue -> pr / commit (loop to code)
+kg:inProject    a owl:ObjectProperty ;           # issue -> project
+    schema:domainIncludes kg:Issue ;
+    schema:rangeIncludes  kg:Project .
+kg:relatedTo    a owl:ObjectProperty ;           # issue <-> issue (Linear "related")
+    schema:domainIncludes kg:Issue ;
+    schema:rangeIncludes  kg:Issue .
+kg:addressedBy  a owl:ObjectProperty ;           # issue -> pr / commit (loop to code)
+    schema:domainIncludes kg:Issue ;
+    schema:rangeIncludes  kg:PullRequest, kg:Commit .
 
 ######################  SEMANTIC PREDICATES  ######################
 
 # learning <-> learning / doc typed relations (recon §2.4 pre-built edge set)
-kg:supersedes     a owl:ObjectProperty ; rdfs:label "supersedes" .
-kg:supersededBy   a owl:ObjectProperty ; owl:inverseOf kg:supersedes .
-kg:duplicateOf    a owl:ObjectProperty .
-kg:recurrenceOf   a owl:ObjectProperty .
-kg:resolvedBy     a owl:ObjectProperty .          # learning -> pr/commit
-kg:regressedBy    a owl:ObjectProperty .          # learning -> pr/commit
-kg:filedAs        a owl:ObjectProperty .          # learning -> issue/ticket
-kg:relatedPr      a owl:ObjectProperty .          # learning -> pr
-kg:relatedSolution a owl:ObjectProperty .         # doc -> doc
-kg:affectsFile    a owl:ObjectProperty .          # learning -> file
+kg:supersedes     a owl:ObjectProperty ; rdfs:label "supersedes" ;
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:Learning .
+kg:supersededBy   a owl:ObjectProperty ; owl:inverseOf kg:supersedes ;
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:Learning .
+kg:duplicateOf    a owl:ObjectProperty ;
+    schema:domainIncludes kg:Issue ;
+    schema:rangeIncludes  kg:Issue .
+kg:recurrenceOf   a owl:ObjectProperty ;
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:Learning .
+# Not written by the ingest yet.
+kg:resolvedBy     a owl:ObjectProperty ;          # learning -> pr/commit
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:PullRequest, kg:Commit .
+kg:regressedBy    a owl:ObjectProperty ;          # learning -> pr/commit
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:PullRequest, kg:Commit .
+kg:filedAs        a owl:ObjectProperty ;          # learning -> issue/ticket
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:Issue .
+kg:relatedPr      a owl:ObjectProperty ;          # learning -> pr
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:PullRequest .
+kg:relatedSolution a owl:ObjectProperty ;         # doc -> doc
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:Doc .
+# Not written by the ingest yet.
+kg:affectsFile    a owl:ObjectProperty ;          # learning -> file
+    schema:domainIncludes kg:Learning ;
+    schema:rangeIncludes  kg:File .
 kg:affectsComponent a owl:DatatypeProperty ; rdfs:range xsd:string .  # raw "file:func"
-kg:tagged         a owl:ObjectProperty ; rdfs:label "tagged" .        # node -> Topic
-kg:dependsOn      a owl:ObjectProperty .          # issue -> issue (todo dependencies)
-kg:aboutLearning  a owl:ObjectProperty .          # StatusUpdate -> Learning
+kg:tagged         a owl:ObjectProperty ; rdfs:label "tagged" ;        # node -> Topic
+    schema:domainIncludes kg:Learning, kg:Decision, kg:Issue ;
+    schema:rangeIncludes  kg:Topic .
+kg:dependsOn      a owl:ObjectProperty ;          # issue -> issue (todo dependencies)
+    schema:domainIncludes kg:Issue ;
+    schema:rangeIncludes  kg:Issue .
+kg:aboutLearning  a owl:ObjectProperty ;          # StatusUpdate -> Learning
+    schema:domainIncludes kg:StatusUpdate ;
+    schema:rangeIncludes  kg:Learning .
 
 # learning scalar properties (normalized frontmatter core, recon §2.1)
 kg:learningId  a owl:DatatypeProperty ; rdfs:range xsd:string .
