@@ -151,6 +151,25 @@ GitHub never sees the oversized file.
 
 ## Serving from Stardog Run
 
+### Building a package with `kg-ingest package`
+
+Before the orchestrator can import the graph into Stardog, build a self-contained package from
+the committed snapshot parts:
+
+```bash
+kg-ingest package --out /tmp/kg-package --database kg_stardog_db
+```
+
+This reads `snapshot/parts/*.nt`, builds `ontology.ttl` (with `rdfs:domain/range` converted to
+`schema:domainIncludes/rangeIncludes` for Stardog's reasoner), one named-graph file per part, and
+the card index files for semantic search. It writes `kit.yaml`, `package.json`, and `data/*.nt`
+into `--out`. No network call or token is needed.
+
+The `--database` value is the Stardog database name (the orchestrator passes it; see AII-1987).
+The kit alias is derived from `knowledge_graph.name` in `sources.yml` with `-` changed to `_`.
+The orchestrator writes `name` and `label` into `sources.yml` before calling this command, so
+those fields are deployment-specific.
+
 Set `KG_BACKEND=stardog_run` to serve queries from a [Stardog Run](https://www.stardog.com/stardog-run/)
 serverless endpoint instead of a local graph file.
 
