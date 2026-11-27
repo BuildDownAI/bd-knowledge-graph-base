@@ -12,6 +12,7 @@ Dual-namespace gate (KGB-6):
 import io
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -43,14 +44,24 @@ def _make_fixture_repo(tmp: Path) -> Path:
     return repo
 
 
-def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> None:
-    """Write a fake `gh` executable into fake_dir."""
+def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_batch: bool = True) -> None:
+    """Write a fake `gh` executable into fake_dir.
+
+    When rate_limit_batch is True (default), the first api graphql call rate-limits
+    (simulating all 3 test PRs being in one failed batch).
+    """
     script = fake_dir / "gh"
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import sys, json, os, re\n"
         "\n"
         f"call_log = {str(call_log)!r}\n"
+        f"rate_limit_batch = {rate_limit_batch!r}\n"
+        "try:\n"
+        "    with open(call_log) as _f:\n"
+        "        prev_lines = _f.read().splitlines()\n"
+        "except Exception:\n"
+        "    prev_lines = []\n"
         "with open(call_log, 'a') as _f:\n"
         "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
         "\n"
@@ -62,20 +73,29 @@ def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> No
         "        print('main')\n"
         "        sys.exit(0)\n"
         "\n"
-        "# GraphQL: return empty thread list\n"
+        "# GraphQL batched PR details\n"
         "if args[:2] == ['api', 'graphql']:\n"
-        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    if rate_limit_batch:\n"
+        "        print('API rate limit exceeded for this resource.', file=sys.stderr)\n"
+        "        sys.exit(1)\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
         "    sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    # Inline review comments and review bodies — check before generic /pulls\n"
-        "    if re.search(r'pulls/\\d+/comments', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
-        "    if re.search(r'pulls/\\d+/reviews', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "    # PR list fetch\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
@@ -89,14 +109,6 @@ def _write_fake_gh(fake_dir: Path, call_log: Path, rate_limit_pr: int = 3) -> No
         " 'state': 'open', 'merged_at': None,"
         " 'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
         "        ]))\n"
-        "        sys.exit(0)\n"
-        "    # Conversation comments fetch\n"
-        "    m = re.search(r'issues/(\\d+)/comments', path)\n"
-        "    if m:\n"
-        f"        if int(m.group(1)) == {rate_limit_pr}:\n"
-        "            print('API rate limit exceeded for this resource.', file=sys.stderr)\n"
-        "            sys.exit(1)\n"
-        "        print(json.dumps([]))\n"
         "        sys.exit(0)\n"
         "\n"
         "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
@@ -125,17 +137,24 @@ def _write_fake_gh_clean(fake_dir: Path, call_log: Path) -> None:
         "        sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', 'graphql']:\n"
-        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
         "    sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    if re.search(r'pulls/\\d+/comments', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
-        "    if re.search(r'pulls/\\d+/reviews', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
         "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},"
@@ -186,17 +205,24 @@ def _write_fake_gh_multipage(fake_dir: Path, call_log: Path, total_prs: int = 21
         "        sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', 'graphql']:\n"
-        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
         "    sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    if re.search(r'pulls/\\d+/comments', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
-        "    if re.search(r'pulls/\\d+/reviews', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         f"        page1 = {json.dumps(page1)}\n"
         f"        page2 = {json.dumps(page2)}\n"
@@ -235,7 +261,7 @@ def check(name: str, got, want) -> None:
 
 
 def test_retry_and_incomplete(repo: Path) -> None:
-    """PR 3 always rate-limits: 4 attempts are made; PRCommentsIncomplete is raised."""
+    """Batch GraphQL always rate-limits: 4 attempts made; PRCommentsIncomplete is raised."""
     from rdflib import Graph
 
     with tempfile.TemporaryDirectory() as d:
@@ -243,7 +269,8 @@ def test_retry_and_incomplete(repo: Path) -> None:
         fake_dir.mkdir()
         call_log = Path(d) / "calls.log"
         call_log.write_text("")
-        _write_fake_gh(fake_dir, call_log, rate_limit_pr=3)
+        # rate_limit_batch=True: every api graphql call rate-limits (never recovers)
+        _write_fake_gh(fake_dir, call_log, rate_limit_batch=True)
 
         with _with_fake_gh(fake_dir):
             g = Graph()
@@ -256,14 +283,14 @@ def test_retry_and_incomplete(repo: Path) -> None:
         assert exc_caught is not None, "Expected PRCommentsIncomplete to be raised"
         print("PASS: PRCommentsIncomplete raised when rate-limit errors exceed threshold")
 
-        # Count calls for PR 3's comment endpoint (read log before tempdir cleanup)
+        # All 3 PRs are in one batch; that batch retries 4 times (1 initial + 3 retries)
         calls = call_log.read_text().splitlines()
-        pr3_comment_calls = [c for c in calls if "issues/3/comments" in c]
-        assert len(pr3_comment_calls) >= 4, (
-            f"Expected >= 4 calls for PR 3 comments (1 initial + 3 retries), "
-            f"got {len(pr3_comment_calls)}: {pr3_comment_calls}"
+        graphql_calls = [c for c in calls if "api graphql" in c]
+        assert len(graphql_calls) >= 4, (
+            f"Expected >= 4 api graphql calls (1 initial + 3 retries), "
+            f"got {len(graphql_calls)}: {graphql_calls}"
         )
-        print(f"PASS: PR 3 comment endpoint called {len(pr3_comment_calls)} times (>= 4)")
+        print(f"PASS: api graphql called {len(graphql_calls)} times (>= 4)")
 
     # Stats must include pr_comments and pr_comment_errors
     stats = exc_caught.stats
@@ -480,7 +507,7 @@ def test_dedup_slug(repo: Path) -> None:
 
 
 def test_review_fetch_error_counts_toward_incomplete(repo: Path) -> None:
-    """A fetch error on pulls/{n}/comments counts toward KG_PR_COMMENTS_INCOMPLETE."""
+    """A fetch error on the batched GraphQL call counts toward KG_PR_COMMENTS_INCOMPLETE."""
     from rdflib import Graph
 
     with tempfile.TemporaryDirectory() as d:
@@ -504,29 +531,19 @@ def test_review_fetch_error_counts_toward_incomplete(repo: Path) -> None:
             "        print('main')\n"
             "        sys.exit(0)\n"
             "\n"
+            "# GraphQL: always rate-limit (never recovers)\n"
             "if args[:2] == ['api', 'graphql']:\n"
-            "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
-            "    sys.exit(0)\n"
+            "    print('API rate limit exceeded.', file=sys.stderr)\n"
+            "    sys.exit(1)\n"
             "\n"
             "if args[:2] == ['api', '--paginate']:\n"
             "    path = args[2] if len(args) > 2 else ''\n"
-            "    # Inline review comments: always fail with rate-limit error\n"
-            "    if re.search(r'pulls/\\d+/comments', path):\n"
-            "        print('API rate limit exceeded.', file=sys.stderr)\n"
-            "        sys.exit(1)\n"
-            "    if re.search(r'pulls/\\d+/reviews', path):\n"
-            "        print(json.dumps([]))\n"
-            "        sys.exit(0)\n"
             "    if re.search(r'/pulls', path):\n"
             "        print(json.dumps([\n"
             "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
             "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
             "             'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
             "        ]))\n"
-            "        sys.exit(0)\n"
-            "    m = re.search(r'issues/(\\d+)/comments', path)\n"
-            "    if m:\n"
-            "        print(json.dumps([]))\n"
             "        sys.exit(0)\n"
             "\n"
             "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
@@ -632,19 +649,26 @@ def _write_fake_gh_rate_limit_once(
         "    print(err_line, file=sys.stderr)\n"
         "    sys.exit(1)\n"
         "\n"
-        "# GraphQL thread states\n"
+        "# GraphQL batched PR details\n"
         "if args[:2] == ['api', 'graphql']:\n"
-        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
         "    sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    if re.search(r'pulls/\\d+/comments', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
-        "    if re.search(r'pulls/\\d+/reviews', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
         "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
@@ -657,10 +681,6 @@ def _write_fake_gh_rate_limit_once(
         "             'state': 'open', 'merged_at': None,\n"
         "             'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
         "        ]))\n"
-        "        sys.exit(0)\n"
-        "    m = re.search(r'issues/(\\d+)/comments', path)\n"
-        "    if m:\n"
-        "        print(json.dumps([]))\n"
         "        sys.exit(0)\n"
         "\n"
         "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
@@ -714,18 +734,26 @@ def _write_fake_gh_rate_limit_always(
         "    print('gh: API rate limit exceeded for installation ID 123.', file=sys.stderr)\n"
         "    sys.exit(1)\n"
         "\n"
+        "# GraphQL batched PR details\n"
         "if args[:2] == ['api', 'graphql']:\n"
-        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+        "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
         "    sys.exit(0)\n"
         "\n"
         "if args[:2] == ['api', '--paginate']:\n"
         "    path = args[2] if len(args) > 2 else ''\n"
-        "    if re.search(r'pulls/\\d+/comments', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
-        "    if re.search(r'pulls/\\d+/reviews', path):\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "    if re.search(r'/pulls', path):\n"
         "        print(json.dumps([\n"
         "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
@@ -739,10 +767,6 @@ def _write_fake_gh_rate_limit_always(
         "             'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
         "        ]))\n"
         "        sys.exit(0)\n"
-        "    m = re.search(r'issues/(\\d+)/comments', path)\n"
-        "    if m:\n"
-        "        print(json.dumps([]))\n"
-        "        sys.exit(0)\n"
         "\n"
         "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
         "sys.exit(1)\n"
@@ -751,7 +775,7 @@ def _write_fake_gh_rate_limit_always(
 
 
 def test_rest_comment_rate_limit_reset_wait(repo: Path) -> None:
-    """Rate limit on issues/N/comments: waits for core reset+5s, retries, completes cleanly."""
+    """Rate limit on the batched GraphQL call: waits for graphql reset+5s, retries, completes."""
     from rdflib import Graph
 
     mock_now = 1000.0
@@ -773,9 +797,9 @@ def test_rest_comment_rate_limit_reset_wait(repo: Path) -> None:
             call_log.write_text("")
             _write_fake_gh_rate_limit_once(
                 fake_dir, call_log,
-                fail_endpoint_re=r"issues/3/comments",
-                rl_core_remaining=0, rl_core_reset=reset_epoch,
-                rl_graphql_remaining=100, rl_graphql_reset=9999,
+                fail_endpoint_re=r"api graphql",
+                rl_core_remaining=100, rl_core_reset=9999,
+                rl_graphql_remaining=0, rl_graphql_reset=reset_epoch,
             )
             with _with_fake_gh(fake_dir):
                 g = Graph()
@@ -789,9 +813,9 @@ def test_rest_comment_rate_limit_reset_wait(repo: Path) -> None:
         f"Expected no pr_comment_errors, got: {stats.get('pr_comment_errors')}"
     )
     assert 605 in sleep_calls or 605.0 in sleep_calls, (
-        f"Expected sleep(605) for core reset wait, got sleep_calls={sleep_calls}"
+        f"Expected sleep(605) for graphql reset wait, got sleep_calls={sleep_calls}"
     )
-    print(f"PASS: REST comment rate limit reset wait: sleep_calls={sleep_calls}, "
+    print(f"PASS: batched GraphQL rate limit reset wait: sleep_calls={sleep_calls}, "
           f"pr_comment_errors={stats.get('pr_comment_errors')!r}")
 
 
@@ -912,12 +936,12 @@ def test_rate_limit_budget_exhausted(repo: Path) -> None:
             fake_dir.mkdir()
             call_log = Path(d) / "calls.log"
             call_log.write_text("")
-            # Always rate-limit issues/3/comments so we exhaust retries.
+            # Always rate-limit the batched graphql call so we exhaust retries.
             _write_fake_gh_rate_limit_always(
                 fake_dir, call_log,
-                fail_endpoint_re=r"issues/3/comments",
-                rl_core_remaining=0, rl_core_reset=reset_epoch,
-                rl_graphql_remaining=100, rl_graphql_reset=9999,
+                fail_endpoint_re=r"api graphql",
+                rl_core_remaining=100, rl_core_reset=9999,
+                rl_graphql_remaining=0, rl_graphql_reset=reset_epoch,
             )
             import io
             buf = io.StringIO()
@@ -968,12 +992,12 @@ def test_secondary_rate_limit_uses_retry_delays(repo: Path) -> None:
             fake_dir.mkdir()
             call_log = Path(d) / "calls.log"
             call_log.write_text("")
-            # remaining=5 means secondary limit, not hourly.
+            # graphql remaining=5 means secondary limit, not hourly.
             _write_fake_gh_rate_limit_always(
                 fake_dir, call_log,
-                fail_endpoint_re=r"issues/3/comments",
-                rl_core_remaining=5, rl_core_reset=1600,
-                rl_graphql_remaining=100, rl_graphql_reset=9999,
+                fail_endpoint_re=r"api graphql",
+                rl_core_remaining=100, rl_core_reset=9999,
+                rl_graphql_remaining=5, rl_graphql_reset=1600,
             )
             import io
             buf = io.StringIO()
@@ -1025,7 +1049,8 @@ def test_rate_limit_check_fails_uses_retry_delays(repo: Path) -> None:
             call_log = Path(d) / "calls.log"
             call_log.write_text("")
             # Use the standard fake gh which does NOT handle rate_limit (exits 1 unhandled).
-            _write_fake_gh(fake_dir, call_log, rate_limit_pr=3)
+            # rate_limit_batch=True: api graphql always rate-limits so rate_limit gets checked.
+            _write_fake_gh(fake_dir, call_log, rate_limit_batch=True)
 
             with _with_fake_gh(fake_dir):
                 g = Graph()
@@ -1063,10 +1088,10 @@ def test_retry_after_no_rate_limit_check(repo: Path) -> None:
             fake_dir.mkdir()
             call_log = Path(d) / "calls.log"
             call_log.write_text("")
-            # Always fail issues/3/comments with retry-after; no rate_limit handler needed.
+            # Always fail the batched graphql call with retry-after; no rate_limit handler needed.
             _write_fake_gh_rate_limit_always(
                 fake_dir, call_log,
-                fail_endpoint_re=r"issues/3/comments",
+                fail_endpoint_re=r"api graphql",
                 rl_core_remaining=0, rl_core_reset=9999,
                 rl_graphql_remaining=0, rl_graphql_reset=9999,
             )
@@ -1105,6 +1130,488 @@ def test_retry_after_no_rate_limit_check(repo: Path) -> None:
     print(f"PASS: retry-after used, rate_limit not called, sleep_calls={sleep_calls}")
 
 
+def _write_fake_gh_with_data(fake_dir: Path, call_log: Path, pr_data_map: dict) -> None:
+    """Fake gh that returns specific GraphQL data for each PR number.
+
+    pr_data_map: {pr_number: {'comments': [...], 'reviews': [...], 'reviewThreads': [...]}}
+    Each comments/reviews/reviewThreads value is a list of raw GraphQL nodes.
+    """
+    pr_data_json = json.dumps(pr_data_map)
+    script = fake_dir / "gh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json, re\n"
+        "\n"
+        f"call_log = {str(call_log)!r}\n"
+        f"pr_data_map = json.loads({pr_data_json!r})\n"
+        "with open(call_log, 'a') as _f:\n"
+        "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        "\n"
+        "args = sys.argv[1:]\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    query_str = ''\n"
+        "    for i, a in enumerate(args):\n"
+        "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+        "            query_str = args[i+1][6:]\n"
+        "            break\n"
+        "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+        "    repo_data = {}\n"
+        "    for n in pr_nums:\n"
+        "        key = str(n)\n"
+        "        d = pr_data_map.get(key, {})\n"
+        "        repo_data[f'pr{n}'] = {\n"
+        "            'comments': {'totalCount': len(d.get('comments', [])), 'nodes': d.get('comments', [])},\n"
+        "            'reviews': {'totalCount': len(d.get('reviews', [])), 'nodes': d.get('reviews', [])},\n"
+        "            'reviewThreads': {'totalCount': len(d.get('reviewThreads', [])), 'nodes': d.get('reviewThreads', [])},\n"
+        "        }\n"
+        "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "if args[:2] == ['api', '--paginate']:\n"
+        "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'/pulls', path):\n"
+        "        prs = [{'number': int(k), 'title': f'PR {k}', 'user': {'login': 'alice'},\n"
+        "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+        "                'merge_commit_sha': f'sha{k}', 'body': '', 'base': {'ref': 'main'}}\n"
+        "               for k in pr_data_map]\n"
+        "        print(json.dumps(prs))\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    script.chmod(0o755)
+
+
+def test_batch_call_count_200_prs(repo: Path) -> None:
+    """200 PRs → exactly 10 api graphql calls and no REST per-PR endpoint calls."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_multipage(fake_dir, call_log, total_prs=200)
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=200)
+
+        calls = call_log.read_text().splitlines()
+    graphql_calls = [c for c in calls if "api graphql" in c]
+    assert len(graphql_calls) == 10, (
+        f"Expected exactly 10 api graphql calls for 200 PRs, got {len(graphql_calls)}"
+    )
+    rest_pr_calls = [c for c in calls if
+                     re.search(r"issues/\d+/comments|pulls/\d+/comments|pulls/\d+/reviews", c)]
+    assert not rest_pr_calls, (
+        f"Expected no per-PR REST calls, got: {rest_pr_calls[:5]}"
+    )
+    print(f"PASS: 200 PRs → {len(graphql_calls)} graphql calls, 0 REST PR calls")
+
+
+def test_bot_author_adds_bracket_bot_suffix(repo: Path) -> None:
+    """GraphQL Bot author gets [bot] suffix; reviewerKind is 'codex'; node is BotAgent."""
+    from rdflib import Graph
+    from kg_ingest import iris as _iris
+
+    bot_comment = {
+        "databaseId": 9001,
+        "body": "codex-review-receipt:v1 looks good",
+        "author": {"login": "chatgpt-codex-connector", "__typename": "Bot"},
+        "createdAt": "2026-05-01T10:00:00Z",
+        "commit": {"oid": "abc123"},
+        "originalCommit": {"oid": "abc123"},
+        "path": "src/foo.py",
+        "line": 42,
+        "originalLine": None,
+    }
+    thread = {
+        "isResolved": False, "isOutdated": False,
+        "comments": {"totalCount": 1, "nodes": [bot_comment]},
+    }
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_with_data(fake_dir, call_log, {"1": {"reviewThreads": [thread]}})
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    from rdflib.namespace import RDF
+    KG = _iris.KG
+    login_lit = "chatgpt-codex-connector[bot]"
+    nodes_with_login = list(g.subjects(_iris.KG.reviewerLogin,
+                                        __import__("rdflib").Literal(login_lit)))
+    assert nodes_with_login, (
+        f"Expected a node with reviewerLogin {login_lit!r}; triples={list(g)[:5]}"
+    )
+    cnode = nodes_with_login[0]
+    kind = str(next(g.objects(cnode, KG.reviewerKind)))
+    assert kind == "codex", f"Expected reviewerKind 'codex', got {kind!r}"
+
+    person_node = _iris.person(login_lit)
+    ptype = str(next(g.objects(person_node, RDF.type), ""))
+    assert "BotAgent" in ptype, f"Expected BotAgent person node, got {ptype!r}"
+    print(f"PASS: bot author: login={login_lit!r}, kind={kind!r}, person type={ptype!r}")
+
+
+def test_human_author_no_bot_suffix(repo: Path) -> None:
+    """GraphQL User author has no [bot] suffix; reviewerKind is 'human'."""
+    from rdflib import Graph
+    from kg_ingest import iris as _iris
+
+    human_comment = {
+        "databaseId": 9002,
+        "body": "This should be changed because it violates the invariant",
+        "author": {"login": "alice", "__typename": "User"},
+        "createdAt": "2026-05-01T10:00:00Z",
+        "commit": {"oid": "abc123"},
+        "originalCommit": {"oid": "abc123"},
+        "path": "src/bar.py",
+        "line": 10,
+        "originalLine": None,
+    }
+    thread = {
+        "isResolved": False, "isOutdated": False,
+        "comments": {"totalCount": 1, "nodes": [human_comment]},
+    }
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_with_data(fake_dir, call_log, {"1": {"reviewThreads": [thread]}})
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    KG = _iris.KG
+    login_lit = "alice"
+    nodes_with_login = list(g.subjects(KG.reviewerLogin,
+                                        __import__("rdflib").Literal(login_lit)))
+    assert nodes_with_login, "Expected node with reviewerLogin 'alice'"
+    cnode = nodes_with_login[0]
+    kind = str(next(g.objects(cnode, KG.reviewerKind)))
+    assert kind == "human", f"Expected reviewerKind 'human', got {kind!r}"
+    print(f"PASS: human author: login={login_lit!r}, kind={kind!r}")
+
+
+def test_mapping_table_rows(repo: Path) -> None:
+    """Every mapping-table row emits the expected triple."""
+    from rdflib import Graph, Literal, XSD
+    from rdflib.namespace import DCTERMS
+    from kg_ingest import iris as _iris
+
+    KG = _iris.KG
+
+    # Inline review comment (review thread comment)
+    rc_node = {
+        "databaseId": 7202388102,
+        "body": "This variable name is misleading and should be renamed",
+        "author": {"login": "reviewer1", "__typename": "User"},
+        "createdAt": "2026-06-01T12:00:00Z",
+        "commit": {"oid": "deadbeef"},
+        "originalCommit": {"oid": "cafebabe"},
+        "path": "src/module.py",
+        "line": None,
+        "originalLine": 55,
+    }
+    thread = {
+        "isResolved": True, "isOutdated": False,
+        "comments": {"totalCount": 1, "nodes": [rc_node]},
+    }
+    # Review body
+    review_node = {
+        "databaseId": 6080016160,
+        "body": "Overall the approach is correct but needs some cleanup before merge",
+        "author": {"login": "reviewer2", "__typename": "User"},
+        "submittedAt": "2026-06-01T13:00:00Z",
+        "state": "CHANGES_REQUESTED",
+        "commit": {"oid": "deadbeef"},
+    }
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_with_data(fake_dir, call_log, {
+            "1": {"reviewThreads": [thread], "reviews": [review_node]}
+        })
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    # --- inline review comment assertions ---
+    cnode = _iris.pr_review_comment("test-org/repo", 1, 7202388102)
+    assert (cnode, KG.commitId, Literal("deadbeef")) in g, "commitId not set"
+    assert (cnode, KG.originalCommitId, Literal("cafebabe")) in g, "originalCommitId not set"
+    assert (cnode, KG.reviewFilePath, Literal("src/module.py")) in g, "reviewFilePath not set"
+    assert (cnode, KG.reviewLine, Literal(55, datatype=XSD.integer)) in g, (
+        "reviewLine from originalLine not set"
+    )
+    assert (cnode, DCTERMS.created, Literal("2026-06-01T12:00:00Z", datatype=XSD.dateTime)) in g, (
+        "dcterms:created not set"
+    )
+    assert (cnode, KG.threadState, Literal("resolved")) in g, "threadState not set"
+    # IRI must contain the databaseId
+    assert "7202388102" in str(cnode), f"node IRI {cnode!r} should contain databaseId"
+
+    # --- review body assertions ---
+    rnode = _iris.pr_review_body("test-org/repo", 1, 6080016160)
+    assert (rnode, KG.reviewState, Literal("CHANGES_REQUESTED")) in g, "reviewState not set"
+    assert (rnode, KG.commitId, Literal("deadbeef")) in g, "review commitId not set"
+    assert (rnode, DCTERMS.created, Literal("2026-06-01T13:00:00Z", datatype=XSD.dateTime)) in g, (
+        "review dcterms:created (submittedAt) not set"
+    )
+    assert "6080016160" in str(rnode), f"review IRI {rnode!r} should contain databaseId"
+    print("PASS: all mapping table rows verified")
+
+
+def test_thread_state_first_and_second_comment(repo: Path) -> None:
+    """First comment of resolved thread → 'resolved'; second → 'unknown'."""
+    from rdflib import Graph
+    from kg_ingest import iris as _iris
+
+    KG = _iris.KG
+
+    def _make_rc(db_id: int, body: str) -> dict:
+        return {
+            "databaseId": db_id,
+            "body": body,
+            "author": {"login": "reviewer", "__typename": "User"},
+            "createdAt": "2026-06-01T12:00:00Z",
+            "commit": {"oid": "abc"},
+            "originalCommit": {"oid": "abc"},
+            "path": "src/x.py",
+            "line": 1,
+            "originalLine": None,
+        }
+
+    thread = {
+        "isResolved": True, "isOutdated": False,
+        "comments": {"totalCount": 2, "nodes": [
+            _make_rc(5001, "This needs fixing before merge can proceed"),
+            _make_rc(5002, "Fixed in the latest commit as requested by reviewer"),
+        ]},
+    }
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_with_data(fake_dir, call_log, {"1": {"reviewThreads": [thread]}})
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    cnode1 = _iris.pr_review_comment("test-org/repo", 1, 5001)
+    cnode2 = _iris.pr_review_comment("test-org/repo", 1, 5002)
+
+    state1 = str(next(g.objects(cnode1, KG.threadState), ""))
+    state2 = str(next(g.objects(cnode2, KG.threadState), ""))
+
+    assert state1 == "resolved", f"First comment: expected 'resolved', got {state1!r}"
+    assert state2 == "unknown", f"Second comment: expected 'unknown', got {state2!r}"
+    print(f"PASS: thread states: first={state1!r}, second={state2!r}")
+
+
+def test_inline_comment_cap_logs_and_truncates(repo: Path) -> None:
+    """PR with 120 inline review comments keeps exactly 100 and prints KG_PR_REVIEW_ITEMS_CAP."""
+    from rdflib import Graph
+    from rdflib.namespace import RDF
+    from kg_ingest import iris as _iris
+
+    def _make_rc(i: int) -> dict:
+        return {
+            "databaseId": 10000 + i,
+            "body": f"This comment is substantive enough to be kept in the graph review {i}",
+            "author": {"login": "reviewer", "__typename": "User"},
+            "createdAt": "2026-06-01T12:00:00Z",
+            "commit": {"oid": "abc"},
+            "originalCommit": {"oid": "abc"},
+            "path": "src/x.py",
+            "line": i + 1,
+            "originalLine": None,
+        }
+
+    # 120 single-comment threads → 120 inline review comments
+    threads = [
+        {"isResolved": False, "isOutdated": False,
+         "comments": {"totalCount": 1, "nodes": [_make_rc(i)]}}
+        for i in range(120)
+    ]
+
+    import io
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        _write_fake_gh_with_data(fake_dir, call_log, {"1": {"reviewThreads": threads}})
+
+        from unittest.mock import patch
+        with _with_fake_gh(fake_dir), patch("sys.stdout", buf):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    out = buf.getvalue()
+    assert "KG_PR_REVIEW_ITEMS_CAP" in out, (
+        f"Expected KG_PR_REVIEW_ITEMS_CAP in stdout, got:\n{out}"
+    )
+    review_comment_nodes = list(g.subjects(RDF.type, _iris.KG.Verification))
+    assert len(review_comment_nodes) == 100, (
+        f"Expected exactly 100 Verification nodes, got {len(review_comment_nodes)}"
+    )
+    print("PASS: cap: 120 inline comments → 100 kept, KG_PR_REVIEW_ITEMS_CAP logged")
+
+
+def test_failed_batch_adds_errors_per_pr(repo: Path) -> None:
+    """One failed batch of 20 PRs in a 200-PR run adds 20 entries to pr_comment_errors."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+
+        # Fail only the first batch (PRs 1-20), succeed for all others
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    # Fail batch 1 (query contains 'pr1: pullRequest') always, succeed for others\n"
+            "    is_batch1 = any('pr1: pullRequest' in a for a in args)\n"
+            "    if is_batch1:\n"
+            "        print('API rate limit exceeded for installation ID 123.', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            "    repo_data = {}\n"
+            "    for n in pr_nums:\n"
+            "        repo_data[f'pr{n}'] = {\n"
+            "            'comments': {'totalCount': 0, 'nodes': []},\n"
+            "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+            "            'reviewThreads': {'totalCount': 0, 'nodes': []},\n"
+            "        }\n"
+            "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 201)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            exc_caught = None
+            try:
+                add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=200)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete for 1 failed batch"
+    stats = exc_caught.stats
+    # 1 failed batch of 20 → 20 error entries; _RETRY_DELAYS exhausted (not rate-limit wait)
+    # pr_comment_errors format: "N (first: ...)"
+    err_str = stats.get("pr_comment_errors", "")
+    err_count = int(err_str.split(" ")[0]) if err_str else 0
+    assert err_count == 20, (
+        f"Expected 20 error entries for 1 failed batch of 20, got: {err_str!r}"
+    )
+    print(f"PASS: failed batch of 20 → 20 error entries: {err_str!r}")
+
+
+def test_graphql_rate_limit_batch_waits_and_completes(repo: Path) -> None:
+    """Rate limit on first batch GraphQL call: waits for graphql reset, retries, no errors."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+    graphql_reset = 1600  # 600 s in the future → candidate = 605
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            _write_fake_gh_rate_limit_once(
+                fake_dir, call_log,
+                fail_endpoint_re=r"api graphql",
+                rl_core_remaining=100, rl_core_reset=9999,
+                rl_graphql_remaining=0, rl_graphql_reset=graphql_reset,
+            )
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert stats.get("pr_comment_errors") is None, (
+        f"Expected no pr_comment_errors after retry, got: {stats.get('pr_comment_errors')}"
+    )
+    assert 605 in sleep_calls or 605.0 in sleep_calls, (
+        f"Expected sleep(605) for graphql reset wait, got: {sleep_calls}"
+    )
+    print(f"PASS: graphql batch rate limit → wait {sleep_calls}, no errors")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -1125,6 +1632,13 @@ def main() -> None:
         test_secondary_rate_limit_uses_retry_delays(repo)
         test_rate_limit_check_fails_uses_retry_delays(repo)
         test_retry_after_no_rate_limit_check(repo)
+        test_batch_call_count_200_prs(repo)
+        test_bot_author_adds_bracket_bot_suffix(repo)
+        test_human_author_no_bot_suffix(repo)
+        test_mapping_table_rows(repo)
+        test_thread_state_first_and_second_comment(repo)
+        test_failed_batch_adds_errors_per_pr(repo)
+        test_graphql_rate_limit_batch_waits_and_completes(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 

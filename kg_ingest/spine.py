@@ -47,6 +47,8 @@ _rate_limit_budget_s: float = _RATE_LIMIT_WAIT_BUDGET_S
 _sleep = time.sleep
 _now = time.time
 
+_PR_DETAIL_BATCH = 20
+
 
 def _parse_paginated_json(text: str) -> tuple[list[dict], int]:
     """Parse concatenated JSON arrays from `gh api --paginate`; returns (items, page_count).
@@ -135,6 +137,16 @@ def _git(repo_path: Path, *args: str) -> str:
 def _is_bot(login: str) -> bool:
     login_lower = login.lower()
     return login_lower.endswith("[bot]") or login_lower.endswith("-bot") or "bot]" in login_lower
+
+
+def _author_login(author: dict | None) -> str:
+    """Convert a GraphQL author node to a REST-style login string."""
+    if author is None:
+        return "unknown"
+    login = author.get("login") or "unknown"
+    if author.get("__typename") == "Bot" and not login.lower().endswith("[bot]"):
+        login = f"{login}[bot]"
+    return login
 
 
 def _pr_comment_run_node(g: Graph, run_id: str, pipeline_ver: str) -> URIRef:
@@ -247,56 +259,153 @@ def _gh_api(cmd_args: list[str], cwd: str | None = None) -> str:
     raise RuntimeError("unreachable")  # loop always returns or raises
 
 
-def _fetch_thread_states(repo_path: Path, repo_slug: str, pr_number: int) -> dict[int, str]:
-    """Return {inline_comment_id: state} for a PR via GraphQL reviewThreads.
+def _build_pr_graphql_field(n: int) -> str:
+    return (
+        f"pr{n}: pullRequest(number: {n}) {{"
+        " comments(first: 50) { totalCount nodes { databaseId body"
+        " author { login __typename } createdAt } }"
+        " reviews(first: 100) { totalCount nodes { databaseId body"
+        " author { login __typename } submittedAt state commit { oid } } }"
+        " reviewThreads(first: 100) { totalCount nodes { isResolved isOutdated"
+        " comments(first: 100) { totalCount nodes { databaseId body"
+        " author { login __typename } createdAt commit { oid }"
+        " originalCommit { oid } path line originalLine } } } }"
+        " }"
+    )
 
-    State is 'resolved', 'outdated', or 'open'. Returns {} on any error so
-    callers record 'unknown' rather than silently marking threads as open.
+
+def _fetch_pr_details_batch(
+    repo_path: Path, repo_slug: str, pr_numbers: list[int],
+    _pr_errors: list[str],
+) -> dict[int, dict]:
+    """Fetch comments, reviews, and review threads for up to _PR_DETAIL_BATCH PRs per GraphQL call.
+
+    Returns {pr_number: {comments, review_comments, reviews, thread_states}}.
+    Failed batches or null aliases add one entry per PR to _pr_errors and return empty data.
     """
     owner, repo_name = repo_slug.split("/", 1)
-    query = (
-        "query($owner: String!, $name: String!, $number: Int!) {"
-        " repository(owner: $owner, name: $name) {"
-        " pullRequest(number: $number) {"
-        " reviewThreads(first: 100) {"
-        " nodes { isResolved isOutdated"
-        " comments(first: 1) { nodes { databaseId } } }"
-        " } } } }"
-    )
-    try:
-        stdout = _gh_api(
-            ["api", "graphql",
-             "-f", f"query={query}",
-             "-F", f"owner={owner}",
-             "-F", f"name={repo_name}",
-             "-F", f"number={pr_number}"],
-            cwd=str(repo_path),
+    result: dict[int, dict] = {}
+    _empty: dict = {"comments": [], "review_comments": [], "reviews": [], "thread_states": {}}
+
+    for batch_start in range(0, len(pr_numbers), _PR_DETAIL_BATCH):
+        batch = pr_numbers[batch_start : batch_start + _PR_DETAIL_BATCH]
+        pr_fields = " ".join(_build_pr_graphql_field(n) for n in batch)
+        query = (
+            "query($owner: String!, $name: String!) {"
+            f" repository(owner: $owner, name: $name) {{ {pr_fields} }}"
+            " }"
         )
-        data = json.loads(stdout)
-        threads = (
-            (data.get("data") or {})
-            .get("repository", {})
-            .get("pullRequest", {})
-            .get("reviewThreads", {})
-            .get("nodes", [])
-        )
-        thread_map: dict[int, str] = {}
-        for thread in threads:
-            if thread.get("isResolved"):
-                state = "resolved"
-            elif thread.get("isOutdated"):
-                state = "outdated"
-            else:
-                state = "open"
-            first_comments = (thread.get("comments") or {}).get("nodes") or []
-            if first_comments:
-                db_id = (first_comments[0] or {}).get("databaseId")
-                if db_id is not None:
-                    thread_map[int(db_id)] = state
-        return thread_map
-    except (subprocess.CalledProcessError, json.JSONDecodeError,
-            KeyError, ValueError, FileNotFoundError):
-        return {}
+        try:
+            stdout = _gh_api(
+                ["api", "graphql",
+                 "-f", f"query={query}",
+                 "-F", f"owner={owner}",
+                 "-F", f"name={repo_name}"],
+                cwd=str(repo_path),
+            )
+            data = json.loads(stdout)
+        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as exc:
+            err_text = (getattr(exc, "stderr", None) or str(exc))[:300]
+            for n in batch:
+                _pr_errors.append(err_text)
+                result[n] = dict(_empty)
+            continue
+
+        if data.get("errors"):
+            err_text = str(data["errors"])[:300]
+            for n in batch:
+                _pr_errors.append(err_text)
+                result[n] = dict(_empty)
+            continue
+
+        repo_data = (data.get("data") or {}).get("repository") or {}
+
+        for n in batch:
+            pr_node = repo_data.get(f"pr{n}")
+            if pr_node is None:
+                _pr_errors.append(f"null alias pr{n} in GraphQL response")
+                result[n] = dict(_empty)
+                continue
+
+            comments = [
+                {
+                    "id": cm["databaseId"],
+                    "body": cm.get("body") or "",
+                    "user": {"login": _author_login(cm.get("author"))},
+                    "created_at": cm.get("createdAt") or "",
+                }
+                for cm in ((pr_node.get("comments") or {}).get("nodes") or [])
+                if cm
+            ]
+
+            reviews_raw = (pr_node.get("reviews") or {}).get("nodes") or []
+            reviews = [
+                {
+                    "id": rv["databaseId"],
+                    "body": rv.get("body") or "",
+                    "user": {"login": _author_login(rv.get("author"))},
+                    "submitted_at": rv.get("submittedAt") or "",
+                    "state": rv.get("state") or "",
+                    "commit_id": (rv.get("commit") or {}).get("oid") or "",
+                }
+                for rv in reviews_raw
+                if rv
+            ]
+
+            threads = (pr_node.get("reviewThreads") or {}).get("nodes") or []
+            review_comments: list[dict] = []
+            thread_states: dict[int, str] = {}
+
+            for thread in threads:
+                if not thread:
+                    continue
+                state = (
+                    "resolved" if thread.get("isResolved")
+                    else "outdated" if thread.get("isOutdated")
+                    else "open"
+                )
+                for idx, tc in enumerate((thread.get("comments") or {}).get("nodes") or []):
+                    if not tc:
+                        continue
+                    cid = tc["databaseId"]
+                    review_comments.append({
+                        "id": cid,
+                        "body": tc.get("body") or "",
+                        "user": {"login": _author_login(tc.get("author"))},
+                        "created_at": tc.get("createdAt") or "",
+                        "commit_id": (tc.get("commit") or {}).get("oid") or "",
+                        "original_commit_id": (tc.get("originalCommit") or {}).get("oid") or "",
+                        "path": tc.get("path") or "",
+                        "line": tc.get("line"),
+                        "original_line": tc.get("originalLine"),
+                    })
+                    if idx == 0:
+                        thread_states[int(cid)] = state
+
+            if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
+                print(
+                    f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
+                    f"{len(review_comments)} inline review comments; "
+                    f"capped at {_MAX_PR_REVIEW_ITEMS}"
+                )
+                review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
+
+            if len(reviews) > _MAX_PR_REVIEW_ITEMS:
+                print(
+                    f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
+                    f"{len(reviews)} review bodies; "
+                    f"capped at {_MAX_PR_REVIEW_ITEMS}"
+                )
+                reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
+
+            result[n] = {
+                "comments": comments[:_MAX_PR_COMMENTS],
+                "review_comments": review_comments,
+                "reviews": reviews,
+                "thread_states": thread_states,
+            }
+
+    return result
 
 
 def _add_pr_review_content(
@@ -529,7 +638,6 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _pr_run_id = iris.stable_run_id(pipeline_ver, repo_slug + ":pr-comments")
         _pr_run = _pr_comment_run_node(g, _pr_run_id, pipeline_ver)
         _pr_errors: list[str] = []
-        _has_rate_limit_error = False
         try:
             raw = _gh_api(
                 ["api", "--paginate",
@@ -543,6 +651,15 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
             omitted = len(all_prs) - len(prs_to_ingest)
             if omitted > 0:
                 stats["prs_omitted_reason"] = f"capped at {max_prs} (fetched {len(all_prs)} total)"
+
+            pr_numbers_to_fetch = [pr["number"] for pr in prs_to_ingest]
+            pr_details = _fetch_pr_details_batch(
+                repo_path, repo_slug, pr_numbers_to_fetch, _pr_errors
+            )
+
+            _empty_detail: dict = {
+                "comments": [], "review_comments": [], "reviews": [], "thread_states": {}
+            }
 
             for pr in prs_to_ingest:
                 pnode = iris.pr(repo_slug, pr["number"])
@@ -580,94 +697,19 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                 people.add(login)
                 stats["prs"] += 1
 
-                # Fetch PR comments; retry and rate-limit handling in _gh_api.
-                comments: list[dict] = []
-                err_text: str | None = None
-                try:
-                    raw_c = _gh_api(
-                        ["api", "--paginate",
-                         f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
-                        cwd=str(repo_path),
-                    )
-                    comments, _ = _parse_paginated_json(raw_c)
-                    comments = comments[:_MAX_PR_COMMENTS]
-                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-                    stderr = getattr(exc, "stderr", None) or ""
-                    err_text = stderr or str(exc)
-                    if "rate limit" in err_text.lower() or "abuse" in err_text.lower():
-                        _has_rate_limit_error = True
-                except json.JSONDecodeError as exc:
-                    err_text = str(exc)
-
-                if err_text is not None:
-                    _pr_errors.append(err_text[:300])
-
-                _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
-
-                # Fetch inline review comments; retry and rate-limit handling in _gh_api.
-                review_comments: list[dict] = []
-                rc_err: str | None = None
-                try:
-                    raw_rc = _gh_api(
-                        ["api", "--paginate",
-                         f"repos/{repo_slug}/pulls/{pr['number']}/comments?per_page=50"],
-                        cwd=str(repo_path),
-                    )
-                    review_comments, _ = _parse_paginated_json(raw_rc)
-                    if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
-                        print(
-                            f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
-                            f"{len(review_comments)} inline review comments; "
-                            f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                        )
-                        review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
-                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-                    stderr = getattr(exc, "stderr", None) or ""
-                    rc_err = stderr or str(exc)
-                    if "rate limit" in rc_err.lower() or "abuse" in rc_err.lower():
-                        _has_rate_limit_error = True
-                except json.JSONDecodeError as exc:
-                    rc_err = str(exc)
-                if rc_err is not None:
-                    _pr_errors.append(rc_err[:300])
-
-                # Fetch review bodies; retry and rate-limit handling in _gh_api.
-                reviews: list[dict] = []
-                rv_err: str | None = None
-                try:
-                    raw_rv = _gh_api(
-                        ["api", "--paginate",
-                         f"repos/{repo_slug}/pulls/{pr['number']}/reviews?per_page=50"],
-                        cwd=str(repo_path),
-                    )
-                    reviews, _ = _parse_paginated_json(raw_rv)
-                    if len(reviews) > _MAX_PR_REVIEW_ITEMS:
-                        print(
-                            f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
-                            f"{len(reviews)} review bodies; "
-                            f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                        )
-                        reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
-                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-                    stderr = getattr(exc, "stderr", None) or ""
-                    rv_err = stderr or str(exc)
-                    if "rate limit" in rv_err.lower() or "abuse" in rv_err.lower():
-                        _has_rate_limit_error = True
-                except json.JSONDecodeError as exc:
-                    rv_err = str(exc)
-                if rv_err is not None:
-                    _pr_errors.append(rv_err[:300])
-
-                # Fetch thread states (best-effort; failure → 'unknown')
-                thread_states = _fetch_thread_states(repo_path, repo_slug, pr["number"])
-
+                detail = pr_details.get(pr["number"], _empty_detail)
+                _add_pr_comments(
+                    g, _pr_run, repo_slug, pr["number"], pnode, detail["comments"], stats
+                )
                 _add_pr_review_content(
                     g, _pr_run, repo_slug, pr["number"], pnode,
-                    review_comments, reviews, thread_states, stats,
+                    detail["review_comments"], detail["reviews"], detail["thread_states"], stats,
                 )
 
             stats["prs_ingested"] = stats["prs"]
-            # Format and check error threshold after the PR loop.
+            _has_rate_limit_error = any(
+                "rate limit" in e.lower() or "abuse" in e.lower() for e in _pr_errors
+            )
             if _pr_errors:
                 stats["pr_comment_errors"] = (
                     f"{len(_pr_errors)} (first: {_pr_errors[0][:120]})"
