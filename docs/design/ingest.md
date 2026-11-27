@@ -124,19 +124,41 @@ it to `sources.yml` and its learnings are picked up with no code change.
 
 ---
 
-## 4a. PR review comment ingest (KGB-47)
+## 4a. PR review comment ingest (KGB-47 + KGB-61)
 
-In addition to conversation comments (`issues/{n}/comments`), the spine fetches two
-more GitHub endpoints per PR and keeps their substantive content as `kg:Verification`
-nodes:
+The spine fetches conversation comments, inline review comments, review bodies, and
+review-thread states for each pull request in one **batched GraphQL query** per 20 PRs.
+All data arrives as `kg:Verification` nodes.
 
-- **Inline review comments** — `pulls/{n}/comments` (line-anchored diff comments from
-  any reviewer).
-- **Review bodies** — `pulls/{n}/reviews` (the summary comment submitted with an
-  Approve / Request changes / Comment review).
+**Batch query structure**: one `gh api graphql` call covers up to `_PR_DETAIL_BATCH = 20`
+pull requests. Each PR is an aliased `pullRequest(number: N)` field under a single
+`repository(owner, name)` query. Each alias fetches:
 
-All three endpoints — `issues/{n}/comments`, `pulls/{n}/comments`, and
-`pulls/{n}/reviews` — go through a shared `_gh_api` helper in `spine.py` that owns
+- `comments(first: 50)` — conversation comments
+- `reviews(first: 100)` — review bodies (Approve / Request Changes / Comment)
+- `reviewThreads(first: 100)` with `comments(first: 100)` per thread — inline diff
+  comments and thread state
+
+**Measured cost**: 21 GraphQL points per batch of 20 PRs (experiment 2026-11-27 against
+`BuildDownAI/AI-Implement`). For 925 pull requests that is 47 queries and approximately
+1,000 points against the separate GraphQL limit (5,000 points per hour).
+
+**Bot login rule**: GraphQL returns a bot login without the `[bot]` suffix (e.g.
+`ai-implement-orchestrator-bot` with `author.__typename == "Bot"`). The converter adds
+`[bot]` when `__typename` is `"Bot"` and the login does not already end with `[bot]`,
+producing `ai-implement-orchestrator-bot[bot]` to match the REST shape that
+`_is_bot` and `should_keep_review_item` expect.
+
+The batched call goes through the same `_gh_api` retry and rate-limit helper. All
+batch calls use the `graphql` rate-limit resource key (not `core`).
+
+A fetch error on a batch adds one `_pr_errors` entry per PR in the batch. The same
+`_has_rate_limit_error` / 10 % threshold / `PRCommentsIncomplete` rule applies.
+
+The REST pull request list call (`pulls?state=all&per_page=100`) is kept. `merged_at`,
+`merge_commit_sha`, and `base.ref` come from it.
+
+All batch calls go through a shared `_gh_api` helper in `spine.py` that owns
 the full retry and rate-limit rule:
 
 - **retry-after in error text**: the helper waits that many seconds and retries.
