@@ -311,13 +311,6 @@ def _fetch_pr_details_batch(
                 result[n] = dict(_empty)
             continue
 
-        if data.get("errors"):
-            err_text = str(data["errors"])[:300]
-            for n in batch:
-                _pr_errors.append(err_text)
-                result[n] = dict(_empty)
-            continue
-
         repo_data = (data.get("data") or {}).get("repository") or {}
 
         for n in batch:
@@ -338,7 +331,9 @@ def _fetch_pr_details_batch(
                 if cm
             ]
 
-            reviews_raw = (pr_node.get("reviews") or {}).get("nodes") or []
+            reviews_obj = pr_node.get("reviews") or {}
+            reviews_total_count = reviews_obj.get("totalCount") or 0
+            reviews_raw = reviews_obj.get("nodes") or []
             reviews = [
                 {
                     "id": rv["databaseId"],
@@ -352,7 +347,9 @@ def _fetch_pr_details_batch(
                 if rv
             ]
 
-            threads = (pr_node.get("reviewThreads") or {}).get("nodes") or []
+            threads_obj = pr_node.get("reviewThreads") or {}
+            threads_total_count = threads_obj.get("totalCount") or 0
+            threads = threads_obj.get("nodes") or []
             review_comments: list[dict] = []
             thread_states: dict[int, str] = {}
 
@@ -382,18 +379,20 @@ def _fetch_pr_details_batch(
                     if idx == 0:
                         thread_states[int(cid)] = state
 
-            if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
+            rc_cap_count = max(len(review_comments), threads_total_count)
+            if rc_cap_count > _MAX_PR_REVIEW_ITEMS:
                 print(
                     f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
-                    f"{len(review_comments)} inline review comments; "
+                    f"{rc_cap_count} inline review comments; "
                     f"capped at {_MAX_PR_REVIEW_ITEMS}"
                 )
                 review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
 
-            if len(reviews) > _MAX_PR_REVIEW_ITEMS:
+            rv_cap_count = max(len(reviews), reviews_total_count)
+            if rv_cap_count > _MAX_PR_REVIEW_ITEMS:
                 print(
                     f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
-                    f"{len(reviews)} review bodies; "
+                    f"{rv_cap_count} review bodies; "
                     f"capped at {_MAX_PR_REVIEW_ITEMS}"
                 )
                 reviews = reviews[:_MAX_PR_REVIEW_ITEMS]

@@ -1318,7 +1318,7 @@ def test_mapping_table_rows(repo: Path) -> None:
 
     KG = _iris.KG
 
-    # Inline review comment (review thread comment)
+    # Inline review comment: line=None → falls back to originalLine
     rc_node = {
         "databaseId": 7202388102,
         "body": "This variable name is misleading and should be renamed",
@@ -1330,9 +1330,21 @@ def test_mapping_table_rows(repo: Path) -> None:
         "line": None,
         "originalLine": 55,
     }
+    # Second comment: line is non-null → kg:reviewLine comes directly from line
+    rc_node2 = {
+        "databaseId": 7202388103,
+        "body": "This function signature needs updating as well",
+        "author": {"login": "reviewer1", "__typename": "User"},
+        "createdAt": "2026-06-01T12:01:00Z",
+        "commit": {"oid": "deadbeef"},
+        "originalCommit": {"oid": "cafebabe"},
+        "path": "src/module.py",
+        "line": 42,
+        "originalLine": 77,
+    }
     thread = {
         "isResolved": True, "isOutdated": False,
-        "comments": {"totalCount": 1, "nodes": [rc_node]},
+        "comments": {"totalCount": 2, "nodes": [rc_node, rc_node2]},
     }
     # Review body
     review_node = {
@@ -1371,6 +1383,12 @@ def test_mapping_table_rows(repo: Path) -> None:
     assert (cnode, KG.threadState, Literal("resolved")) in g, "threadState not set"
     # IRI must contain the databaseId
     assert "7202388102" in str(cnode), f"node IRI {cnode!r} should contain databaseId"
+
+    # second comment: line is non-null → kg:reviewLine must come directly from line, not originalLine
+    cnode2 = _iris.pr_review_comment("test-org/repo", 1, 7202388103)
+    assert (cnode2, KG.reviewLine, Literal(42, datatype=XSD.integer)) in g, (
+        "reviewLine from non-null line not set (should be 42, not 77)"
+    )
 
     # --- review body assertions ---
     rnode = _iris.pr_review_body("test-org/repo", 1, 6080016160)
@@ -1612,6 +1630,210 @@ def test_graphql_rate_limit_batch_waits_and_completes(repo: Path) -> None:
     print(f"PASS: graphql batch rate limit → wait {sleep_calls}, no errors")
 
 
+def test_totalcount_cap_graphql_truncation(repo: Path) -> None:
+    """Cap fires when totalCount > _MAX but first:100 returns exactly _MAX nodes."""
+    from rdflib import Graph
+    from rdflib.namespace import RDF
+    from kg_ingest import iris as _iris
+
+    def _make_rc(i: int) -> dict:
+        return {
+            "databaseId": 20000 + i,
+            "body": f"This comment body is long enough to be substantive for item {i}",
+            "author": {"login": "reviewer", "__typename": "User"},
+            "createdAt": "2026-06-01T12:00:00Z",
+            "commit": {"oid": "abc"},
+            "originalCommit": {"oid": "abc"},
+            "path": "src/x.py",
+            "line": i + 1,
+            "originalLine": None,
+        }
+
+    # Fake that returns totalCount=120 but only 100 thread nodes (mimics first:100 GraphQL limit)
+    threads_100 = [
+        {"isResolved": False, "isOutdated": False,
+         "comments": {"totalCount": 1, "nodes": [_make_rc(i)]}}
+        for i in range(100)
+    ]
+    pr_data_json = json.dumps({"1": {"reviewThreads": threads_100}})
+
+    import io
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            f"pr_data_map = json.loads({pr_data_json!r})\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            "    repo_data = {}\n"
+            "    for n in pr_nums:\n"
+            "        key = str(n)\n"
+            "        d = pr_data_map.get(key, {})\n"
+            "        threads = d.get('reviewThreads', [])\n"
+            "        repo_data[f'pr{n}'] = {\n"
+            "            'comments': {'totalCount': 0, 'nodes': []},\n"
+            "            'reviews': {'totalCount': 0, 'nodes': []},\n"
+            # totalCount=120 but only 100 nodes — simulates first:100 GraphQL page boundary
+            "            'reviewThreads': {'totalCount': 120, 'nodes': threads},\n"
+            "        }\n"
+            "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': 'sha1', 'body': '', 'base': {'ref': 'main'}}]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        from unittest.mock import patch
+        with _with_fake_gh(fake_dir), patch("sys.stdout", buf):
+            g = Graph()
+            add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=1)
+
+    out = buf.getvalue()
+    assert "KG_PR_REVIEW_ITEMS_CAP" in out, (
+        f"Expected KG_PR_REVIEW_ITEMS_CAP when totalCount=120 > cap=100, got:\n{out}"
+    )
+    review_comment_nodes = list(g.subjects(RDF.type, _iris.KG.Verification))
+    assert len(review_comment_nodes) == 100, (
+        f"Expected exactly 100 Verification nodes, got {len(review_comment_nodes)}"
+    )
+    print("PASS: totalCount=120 with 100 nodes → cap fires, 100 Verification nodes kept")
+
+
+def test_partial_success_top_level_errors(repo: Path) -> None:
+    """GraphQL partial success: errors + valid alias → valid PR processed, null alias errors."""
+    from rdflib import Graph
+    from rdflib.namespace import RDF
+    from kg_ingest import iris as _iris
+
+    rc_node = {
+        "databaseId": 8001,
+        "body": "This comment comes from a partially successful GraphQL response",
+        "author": {"login": "alice", "__typename": "User"},
+        "createdAt": "2026-06-01T12:00:00Z",
+        "commit": {"oid": "abc"},
+        "originalCommit": {"oid": "abc"},
+        "path": "src/x.py",
+        "line": 10,
+        "originalLine": None,
+    }
+    thread = {
+        "isResolved": False, "isOutdated": False,
+        "comments": {"totalCount": 1, "nodes": [rc_node]},
+    }
+    pr1_data = {
+        "comments": {"totalCount": 0, "nodes": []},
+        "reviews": {"totalCount": 0, "nodes": []},
+        "reviewThreads": {"totalCount": 1, "nodes": [thread]},
+    }
+    pr1_json = json.dumps(pr1_data)
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            f"pr1_data = json.loads({pr1_json!r})\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            # Return errors + partial data: pr1 valid, pr2 null
+            "    repo_data = {'pr1': pr1_data, 'pr2': None}\n"
+            "    response = {\n"
+            "        'errors': [{'message': 'Could not resolve pr2'}],\n"
+            "        'data': {'repository': repo_data},\n"
+            "    }\n"
+            "    print(json.dumps(response))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [\n"
+            "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
+            "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "             'merge_commit_sha': 'sha1', 'body': '', 'base': {'ref': 'main'}},\n"
+            "            {'number': 2, 'title': 'PR 2', 'user': {'login': 'alice'},\n"
+            "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "             'merge_commit_sha': 'sha2', 'body': '', 'base': {'ref': 'main'}},\n"
+            "        ]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=2)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+        stats = exc_caught.stats if exc_caught is not None else {}
+
+    # PR 1 had valid data → its review comment node should be in the graph
+    cnode = _iris.pr_review_comment("test-org/repo", 1, 8001)
+    assert (cnode, RDF.type, _iris.KG.Verification) in g, (
+        "PR 1 review comment missing despite valid partial GraphQL data"
+    )
+    # PR 2 had null data → should contribute one error entry
+    err_str = stats.get("pr_comment_errors", "")
+    err_count = int(err_str.split(" ")[0]) if err_str else 0
+    assert err_count == 1, (
+        f"Expected 1 error for null pr2 alias in partial-success response, got {err_str!r}"
+    )
+    print(f"PASS: partial success with top-level errors: PR 1 processed, PR 2 error counted")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -1637,8 +1859,11 @@ def main() -> None:
         test_human_author_no_bot_suffix(repo)
         test_mapping_table_rows(repo)
         test_thread_state_first_and_second_comment(repo)
+        test_inline_comment_cap_logs_and_truncates(repo)
         test_failed_batch_adds_errors_per_pr(repo)
         test_graphql_rate_limit_batch_waits_and_completes(repo)
+        test_totalcount_cap_graphql_truncation(repo)
+        test_partial_success_top_level_errors(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 
