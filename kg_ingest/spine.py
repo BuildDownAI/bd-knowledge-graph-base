@@ -34,6 +34,19 @@ _MAX_PR_REVIEW_ITEMS = 100
 # Injectable for tests: monkeypatch spine._RETRY_DELAYS = (0, 0, 0).
 _RETRY_DELAYS: tuple[int, ...] = (5, 15, 45)
 
+# Total seconds this process may spend waiting for a GitHub hourly limit reset.
+# Sized to fit one full reset; the orchestrator ends a refresh after 4 hours
+# (KG_REFRESH_TOTAL_DEADLINE_MS in BuildDownAI/AI-Implement).
+_RATE_LIMIT_WAIT_BUDGET_S: float = 75 * 60
+
+# Mutable runtime budget; decremented on each reset wait (shared across all repos in the run).
+# Injectable for tests: monkeypatch _rate_limit_budget_s = _RATE_LIMIT_WAIT_BUDGET_S.
+_rate_limit_budget_s: float = _RATE_LIMIT_WAIT_BUDGET_S
+
+# Injectable for tests: monkeypatch to avoid real waits.
+_sleep = time.sleep
+_now = time.time
+
 
 def _parse_paginated_json(text: str) -> tuple[list[dict], int]:
     """Parse concatenated JSON arrays from `gh api --paginate`; returns (items, page_count).
@@ -173,6 +186,67 @@ def _strip_badges(text: str) -> str:
     return re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
 
 
+def _gh_api(cmd_args: list[str], cwd: str | None = None) -> str:
+    """Run `gh <cmd_args>` and return stdout. Owns the full retry and rate-limit rule.
+
+    Retry rules, applied in order on each CalledProcessError with a rate-limit message:
+    - retry-after in error text: wait that many seconds, then retry.
+    - Hourly limit (remaining==0): run `gh api rate_limit`, wait until reset+5s (up to
+      _rate_limit_budget_s), log KG_RATE_LIMIT_WAIT:, then retry.
+    - Secondary limit (remaining>0), rate_limit check fails, or budget exhausted: use
+      _RETRY_DELAYS.
+    Raises after len(_RETRY_DELAYS)+1 total attempts.
+
+    is_graphql: cmd_args starts with ["api", "graphql"] — stable for current call sites
+    and the planned KGB-61 batched-GraphQL calls; determines which rate-limit resource to
+    read ("graphql" vs "core").
+    """
+    global _rate_limit_budget_s
+    is_graphql = len(cmd_args) >= 2 and cmd_args[0] == "api" and cmd_args[1] == "graphql"
+    limit_key = "graphql" if is_graphql else "core"
+
+    for _attempt in range(len(_RETRY_DELAYS) + 1):
+        try:
+            return subprocess.run(
+                ["gh", *cmd_args],
+                capture_output=True, text=True, check=True, cwd=cwd,
+            ).stdout
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            stderr = getattr(exc, "stderr", None) or ""
+            err_text = stderr or str(exc)
+            is_rate_limit = "rate limit" in err_text.lower() or "abuse" in err_text.lower()
+            if not is_rate_limit or _attempt >= len(_RETRY_DELAYS):
+                raise
+            m = re.search(r"retry.?after[:\s]+(\d+)", err_text, re.IGNORECASE)
+            if m:
+                _sleep(int(m.group(1)))
+                continue
+            # Hourly-limit path: check the reset time via gh api rate_limit.
+            wait: float | None = None
+            try:
+                rl_raw = subprocess.run(
+                    ["gh", "api", "rate_limit"],
+                    capture_output=True, text=True, check=True, cwd=cwd,
+                ).stdout
+                rl = json.loads(rl_raw)
+                resource = rl["resources"][limit_key]
+                if resource["remaining"] == 0:
+                    reset = resource["reset"]
+                    if isinstance(reset, (int, float)):
+                        candidate = max(0.0, float(reset) - _now()) + 5
+                        if candidate <= _rate_limit_budget_s:
+                            wait = candidate
+                            _rate_limit_budget_s -= wait
+            except Exception:
+                pass
+            if wait is not None:
+                print(f"KG_RATE_LIMIT_WAIT: {int(wait)} s ({limit_key})")
+                _sleep(wait)
+            else:
+                _sleep(_RETRY_DELAYS[_attempt])
+    raise RuntimeError("unreachable")  # loop always returns or raises
+
+
 def _fetch_thread_states(repo_path: Path, repo_slug: str, pr_number: int) -> dict[int, str]:
     """Return {inline_comment_id: state} for a PR via GraphQL reviewThreads.
 
@@ -190,15 +264,15 @@ def _fetch_thread_states(repo_path: Path, repo_slug: str, pr_number: int) -> dic
         " } } } }"
     )
     try:
-        result = subprocess.run(
-            ["gh", "api", "graphql",
+        stdout = _gh_api(
+            ["api", "graphql",
              "-f", f"query={query}",
              "-F", f"owner={owner}",
              "-F", f"name={repo_name}",
              "-F", f"number={pr_number}"],
-            capture_output=True, text=True, check=True, cwd=str(repo_path),
+            cwd=str(repo_path),
         )
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
         threads = (
             (data.get("data") or {})
             .get("repository", {})
@@ -457,11 +531,11 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
         _pr_errors: list[str] = []
         _has_rate_limit_error = False
         try:
-            raw = subprocess.run(
-                ["gh", "api", "--paginate",
+            raw = _gh_api(
+                ["api", "--paginate",
                  f"repos/{repo_slug}/pulls?state=all&per_page=100"],
-                capture_output=True, text=True, check=True, cwd=str(repo_path),
-            ).stdout
+                cwd=str(repo_path),
+            )
             all_prs, pr_pages = _parse_paginated_json(raw)
             stats["prs_total"] = len(all_prs)
             stats["pr_pages_fetched"] = pr_pages
@@ -506,115 +580,81 @@ def add_spine(g: Graph, repo_path: Path, repo_slug: str,
                 people.add(login)
                 stats["prs"] += 1
 
-                # Fetch PR comments with retry on rate-limit errors.
+                # Fetch PR comments; retry and rate-limit handling in _gh_api.
                 comments: list[dict] = []
                 err_text: str | None = None
-                for _attempt in range(len(_RETRY_DELAYS) + 1):
-                    try:
-                        raw_c = subprocess.run(
-                            ["gh", "api", "--paginate",
-                             f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
-                            capture_output=True, text=True, check=True, cwd=str(repo_path),
-                        ).stdout
-                        comments, _ = _parse_paginated_json(raw_c)
-                        comments = comments[:_MAX_PR_COMMENTS]
-                        err_text = None
-                        break
-                    except (subprocess.CalledProcessError, json.JSONDecodeError,
-                            FileNotFoundError) as exc:
-                        stderr = getattr(exc, "stderr", None) or ""
-                        err_text = stderr or str(exc)
-                        is_rate_limit = (
-                            "rate limit" in err_text.lower()
-                            or "abuse" in err_text.lower()
-                        )
-                        if is_rate_limit:
-                            _has_rate_limit_error = True
-                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
-                            m = re.search(r"retry.?after[:\s]+(\d+)", err_text, re.IGNORECASE)
-                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
-                            time.sleep(wait)
-                        else:
-                            break
+                try:
+                    raw_c = _gh_api(
+                        ["api", "--paginate",
+                         f"repos/{repo_slug}/issues/{pr['number']}/comments?per_page=50"],
+                        cwd=str(repo_path),
+                    )
+                    comments, _ = _parse_paginated_json(raw_c)
+                    comments = comments[:_MAX_PR_COMMENTS]
+                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                    stderr = getattr(exc, "stderr", None) or ""
+                    err_text = stderr or str(exc)
+                    if "rate limit" in err_text.lower() or "abuse" in err_text.lower():
+                        _has_rate_limit_error = True
+                except json.JSONDecodeError as exc:
+                    err_text = str(exc)
 
                 if err_text is not None:
                     _pr_errors.append(err_text[:300])
 
                 _add_pr_comments(g, _pr_run, repo_slug, pr["number"], pnode, comments, stats)
 
-                # Fetch inline review comments (pulls/{n}/comments)
+                # Fetch inline review comments; retry and rate-limit handling in _gh_api.
                 review_comments: list[dict] = []
                 rc_err: str | None = None
-                for _attempt in range(len(_RETRY_DELAYS) + 1):
-                    try:
-                        raw_rc = subprocess.run(
-                            ["gh", "api", "--paginate",
-                             f"repos/{repo_slug}/pulls/{pr['number']}/comments?per_page=50"],
-                            capture_output=True, text=True, check=True, cwd=str(repo_path),
-                        ).stdout
-                        review_comments, _ = _parse_paginated_json(raw_rc)
-                        if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
-                            print(
-                                f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
-                                f"{len(review_comments)} inline review comments; "
-                                f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                            )
-                            review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
-                        rc_err = None
-                        break
-                    except (subprocess.CalledProcessError, json.JSONDecodeError,
-                            FileNotFoundError) as exc:
-                        stderr = getattr(exc, "stderr", None) or ""
-                        rc_err = stderr or str(exc)
-                        is_rate_limit = (
-                            "rate limit" in rc_err.lower() or "abuse" in rc_err.lower()
+                try:
+                    raw_rc = _gh_api(
+                        ["api", "--paginate",
+                         f"repos/{repo_slug}/pulls/{pr['number']}/comments?per_page=50"],
+                        cwd=str(repo_path),
+                    )
+                    review_comments, _ = _parse_paginated_json(raw_rc)
+                    if len(review_comments) > _MAX_PR_REVIEW_ITEMS:
+                        print(
+                            f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
+                            f"{len(review_comments)} inline review comments; "
+                            f"capped at {_MAX_PR_REVIEW_ITEMS}"
                         )
-                        if is_rate_limit:
-                            _has_rate_limit_error = True
-                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
-                            m = re.search(r"retry.?after[:\s]+(\d+)", rc_err, re.IGNORECASE)
-                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
-                            time.sleep(wait)
-                        else:
-                            break
+                        review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
+                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                    stderr = getattr(exc, "stderr", None) or ""
+                    rc_err = stderr or str(exc)
+                    if "rate limit" in rc_err.lower() or "abuse" in rc_err.lower():
+                        _has_rate_limit_error = True
+                except json.JSONDecodeError as exc:
+                    rc_err = str(exc)
                 if rc_err is not None:
                     _pr_errors.append(rc_err[:300])
 
-                # Fetch review bodies (pulls/{n}/reviews)
+                # Fetch review bodies; retry and rate-limit handling in _gh_api.
                 reviews: list[dict] = []
                 rv_err: str | None = None
-                for _attempt in range(len(_RETRY_DELAYS) + 1):
-                    try:
-                        raw_rv = subprocess.run(
-                            ["gh", "api", "--paginate",
-                             f"repos/{repo_slug}/pulls/{pr['number']}/reviews?per_page=50"],
-                            capture_output=True, text=True, check=True, cwd=str(repo_path),
-                        ).stdout
-                        reviews, _ = _parse_paginated_json(raw_rv)
-                        if len(reviews) > _MAX_PR_REVIEW_ITEMS:
-                            print(
-                                f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
-                                f"{len(reviews)} review bodies; "
-                                f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                            )
-                            reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
-                        rv_err = None
-                        break
-                    except (subprocess.CalledProcessError, json.JSONDecodeError,
-                            FileNotFoundError) as exc:
-                        stderr = getattr(exc, "stderr", None) or ""
-                        rv_err = stderr or str(exc)
-                        is_rate_limit = (
-                            "rate limit" in rv_err.lower() or "abuse" in rv_err.lower()
+                try:
+                    raw_rv = _gh_api(
+                        ["api", "--paginate",
+                         f"repos/{repo_slug}/pulls/{pr['number']}/reviews?per_page=50"],
+                        cwd=str(repo_path),
+                    )
+                    reviews, _ = _parse_paginated_json(raw_rv)
+                    if len(reviews) > _MAX_PR_REVIEW_ITEMS:
+                        print(
+                            f"KG_PR_REVIEW_ITEMS_CAP: PR {pr['number']} has "
+                            f"{len(reviews)} review bodies; "
+                            f"capped at {_MAX_PR_REVIEW_ITEMS}"
                         )
-                        if is_rate_limit:
-                            _has_rate_limit_error = True
-                        if is_rate_limit and _attempt < len(_RETRY_DELAYS):
-                            m = re.search(r"retry.?after[:\s]+(\d+)", rv_err, re.IGNORECASE)
-                            wait = int(m.group(1)) if m else _RETRY_DELAYS[_attempt]
-                            time.sleep(wait)
-                        else:
-                            break
+                        reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
+                except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+                    stderr = getattr(exc, "stderr", None) or ""
+                    rv_err = stderr or str(exc)
+                    if "rate limit" in rv_err.lower() or "abuse" in rv_err.lower():
+                        _has_rate_limit_error = True
+                except json.JSONDecodeError as exc:
+                    rv_err = str(exc)
                 if rv_err is not None:
                     _pr_errors.append(rv_err[:300])
 

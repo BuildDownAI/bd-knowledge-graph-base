@@ -135,9 +135,26 @@ nodes:
 - **Review bodies** — `pulls/{n}/reviews` (the summary comment submitted with an
   Approve / Request changes / Comment review).
 
-Both endpoints use the same retry-on-rate-limit loop and error-count threshold as the
-conversation-comment fetch. A fetch error on either endpoint counts toward
-`KG_PR_COMMENTS_INCOMPLETE` in the same way.
+All three endpoints — `issues/{n}/comments`, `pulls/{n}/comments`, and
+`pulls/{n}/reviews` — go through a shared `_gh_api` helper in `spine.py` that owns
+the full retry and rate-limit rule:
+
+- **retry-after in error text**: the helper waits that many seconds and retries.
+- **GitHub hourly limit** (no `retry-after`): the helper calls `gh api rate_limit`,
+  reads the reset time for the correct quota (`core` for REST calls, `graphql` for
+  `gh api graphql` calls), and when `remaining` is 0 waits until that time plus 5
+  seconds, then retries. It logs one line per reset wait:
+  `KG_RATE_LIMIT_WAIT: <seconds> s (<core|graphql>)`.
+- **Secondary limit** (`remaining` > 0), `gh api rate_limit` failure, or **budget
+  exhausted**: falls back to `_RETRY_DELAYS = (5, 15, 45)` seconds.
+
+The total reset-wait time for one ingest process is capped at
+`_RATE_LIMIT_WAIT_BUDGET_S = 75 * 60` seconds (75 minutes). This budget is shared
+across all repositories in the run. One full hourly reset must fit; the orchestrator
+ends a refresh after 4 hours.
+
+A fetch error on any endpoint counts toward `KG_PR_COMMENTS_INCOMPLETE` in the same
+way. A call that succeeds after a wait records no error.
 
 **Keep rules for review content** (conversation comments keep the existing rules):
 
