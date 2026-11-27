@@ -562,6 +562,549 @@ def test_review_fetch_error_counts_toward_incomplete(repo: Path) -> None:
     print("PASS: snapshot/ unchanged after PRCommentsIncomplete")
 
 
+def _write_fake_gh_rate_limit_once(
+    fake_dir: Path,
+    call_log: Path,
+    fail_endpoint_re: str,
+    rl_core_remaining: int,
+    rl_core_reset: int,
+    rl_graphql_remaining: int,
+    rl_graphql_reset: int,
+    retry_after: int | None = None,
+) -> None:
+    """Fake gh that rate-limits the matching endpoint on the first call, then succeeds.
+
+    Handles `gh api rate_limit` with configurable core/graphql remaining and reset values.
+    If retry_after is set, includes it in the rate-limit error stderr instead of consulting
+    rate_limit.
+    """
+    err_line = "gh: API rate limit exceeded for installation ID 123."
+    if retry_after is not None:
+        err_line = f"gh: API rate limit exceeded. retry-after: {retry_after}"
+
+    rl_response = json.dumps({
+        "resources": {
+            "core": {"remaining": rl_core_remaining, "reset": rl_core_reset},
+            "graphql": {"remaining": rl_graphql_remaining, "reset": rl_graphql_reset},
+        }
+    })
+
+    script = fake_dir / "gh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json, re\n"
+        "\n"
+        f"call_log = {str(call_log)!r}\n"
+        f"fail_ep_re = {fail_endpoint_re!r}\n"
+        f"err_line = {err_line!r}\n"
+        f"rl_response = {rl_response!r}\n"
+        "\n"
+        "args = sys.argv[1:]\n"
+        "\n"
+        "# Read prior calls BEFORE writing this one (for counting)\n"
+        "try:\n"
+        "    with open(call_log) as _f:\n"
+        "        prev_lines = _f.read().splitlines()\n"
+        "except Exception:\n"
+        "    prev_lines = []\n"
+        "\n"
+        "with open(call_log, 'a') as _f:\n"
+        "    _f.write(' '.join(args) + '\\n')\n"
+        "\n"
+        "# Rate limit check endpoint\n"
+        "if args == ['api', 'rate_limit']:\n"
+        "    print(rl_response)\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "# Default branch query\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "# Check if this call matches the failing endpoint\n"
+        "call_str = ' '.join(args)\n"
+        "is_failing_ep = bool(re.search(fail_ep_re, call_str))\n"
+        "prev_fail_count = sum(1 for l in prev_lines if re.search(fail_ep_re, l))\n"
+        "\n"
+        "if is_failing_ep and prev_fail_count == 0:\n"
+        "    print(err_line, file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "\n"
+        "# GraphQL thread states\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "if args[:2] == ['api', '--paginate']:\n"
+        "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'pulls/\\d+/comments', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'pulls/\\d+/reviews', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'/pulls', path):\n"
+        "        print(json.dumps([\n"
+        "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
+        "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+        "             'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 2, 'title': 'PR 2', 'user': {'login': 'bob'},\n"
+        "             'state': 'closed', 'merged_at': '2026-01-02T00:00:00Z',\n"
+        "             'merge_commit_sha': 'bbb222', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 3, 'title': 'PR 3', 'user': {'login': 'carol'},\n"
+        "             'state': 'open', 'merged_at': None,\n"
+        "             'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
+        "        ]))\n"
+        "        sys.exit(0)\n"
+        "    m = re.search(r'issues/(\\d+)/comments', path)\n"
+        "    if m:\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    script.chmod(0o755)
+
+
+def _write_fake_gh_rate_limit_always(
+    fake_dir: Path,
+    call_log: Path,
+    fail_endpoint_re: str,
+    rl_core_remaining: int,
+    rl_core_reset: int,
+    rl_graphql_remaining: int,
+    rl_graphql_reset: int,
+) -> None:
+    """Fake gh that always rate-limits the matching endpoint (never recovers)."""
+    rl_response = json.dumps({
+        "resources": {
+            "core": {"remaining": rl_core_remaining, "reset": rl_core_reset},
+            "graphql": {"remaining": rl_graphql_remaining, "reset": rl_graphql_reset},
+        }
+    })
+
+    script = fake_dir / "gh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, json, re\n"
+        "\n"
+        f"call_log = {str(call_log)!r}\n"
+        f"fail_ep_re = {fail_endpoint_re!r}\n"
+        f"rl_response = {rl_response!r}\n"
+        "\n"
+        "args = sys.argv[1:]\n"
+        "with open(call_log, 'a') as _f:\n"
+        "    _f.write(' '.join(args) + '\\n')\n"
+        "\n"
+        "if args == ['api', 'rate_limit']:\n"
+        "    print(rl_response)\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+        "    jq_idx = args.index('--jq')\n"
+        "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+        "        print('main')\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "call_str = ' '.join(args)\n"
+        "if re.search(fail_ep_re, call_str):\n"
+        "    print('gh: API rate limit exceeded for installation ID 123.', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "\n"
+        "if args[:2] == ['api', 'graphql']:\n"
+        "    print(json.dumps({'data': {'repository': {'pullRequest': {'reviewThreads': {'nodes': []}}}}}))\n"
+        "    sys.exit(0)\n"
+        "\n"
+        "if args[:2] == ['api', '--paginate']:\n"
+        "    path = args[2] if len(args) > 2 else ''\n"
+        "    if re.search(r'pulls/\\d+/comments', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'pulls/\\d+/reviews', path):\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "    if re.search(r'/pulls', path):\n"
+        "        print(json.dumps([\n"
+        "            {'number': 1, 'title': 'PR 1', 'user': {'login': 'alice'},\n"
+        "             'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+        "             'merge_commit_sha': 'aaa111', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 2, 'title': 'PR 2', 'user': {'login': 'bob'},\n"
+        "             'state': 'closed', 'merged_at': '2026-01-02T00:00:00Z',\n"
+        "             'merge_commit_sha': 'bbb222', 'body': '', 'base': {'ref': 'main'}},\n"
+        "            {'number': 3, 'title': 'PR 3', 'user': {'login': 'carol'},\n"
+        "             'state': 'open', 'merged_at': None,\n"
+        "             'merge_commit_sha': None, 'body': '', 'base': {'ref': 'main'}},\n"
+        "        ]))\n"
+        "        sys.exit(0)\n"
+        "    m = re.search(r'issues/(\\d+)/comments', path)\n"
+        "    if m:\n"
+        "        print(json.dumps([]))\n"
+        "        sys.exit(0)\n"
+        "\n"
+        "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    script.chmod(0o755)
+
+
+def test_rest_comment_rate_limit_reset_wait(repo: Path) -> None:
+    """Rate limit on issues/N/comments: waits for core reset+5s, retries, completes cleanly."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+    reset_epoch = 1600  # 600 s in the future → candidate = 605
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            _write_fake_gh_rate_limit_once(
+                fake_dir, call_log,
+                fail_endpoint_re=r"issues/3/comments",
+                rl_core_remaining=0, rl_core_reset=reset_epoch,
+                rl_graphql_remaining=100, rl_graphql_reset=9999,
+            )
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert stats.get("pr_comment_errors") is None, (
+        f"Expected no pr_comment_errors, got: {stats.get('pr_comment_errors')}"
+    )
+    assert 605 in sleep_calls or 605.0 in sleep_calls, (
+        f"Expected sleep(605) for core reset wait, got sleep_calls={sleep_calls}"
+    )
+    print(f"PASS: REST comment rate limit reset wait: sleep_calls={sleep_calls}, "
+          f"pr_comment_errors={stats.get('pr_comment_errors')!r}")
+
+
+def test_graphql_rate_limit_reset_uses_graphql_key(repo: Path) -> None:
+    """GraphQL rate limit reads graphql.reset, not core.reset."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+    core_reset = 1400    # would give 405 s if wrongly used
+    graphql_reset = 1600  # correct key → 605 s
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # Fail the first GraphQL thread-states call with a rate limit error.
+            _write_fake_gh_rate_limit_once(
+                fake_dir, call_log,
+                fail_endpoint_re=r"api graphql",
+                rl_core_remaining=100, rl_core_reset=core_reset,
+                rl_graphql_remaining=0, rl_graphql_reset=graphql_reset,
+            )
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert stats.get("pr_comment_errors") is None, (
+        f"Expected no pr_comment_errors, got: {stats.get('pr_comment_errors')!r}"
+    )
+    assert 605 in sleep_calls or 605.0 in sleep_calls, (
+        f"Expected sleep(605) from graphql.reset={graphql_reset}, "
+        f"not 405 from core.reset={core_reset}. Got: {sleep_calls}"
+    )
+    assert 405 not in sleep_calls and 405.0 not in sleep_calls, (
+        f"core.reset was incorrectly used: sleep_calls={sleep_calls}"
+    )
+    print(f"PASS: GraphQL rate limit reads graphql.reset: sleep_calls={sleep_calls}")
+
+
+def test_pr_list_rate_limit_reset_wait(repo: Path) -> None:
+    """Rate limit on the PR list fetch: waits for reset, retries, pr_error not set."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+    reset_epoch = 1600
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # Match only the PR list endpoint (not issues/N/comments which also contains "pulls")
+            _write_fake_gh_rate_limit_once(
+                fake_dir, call_log,
+                fail_endpoint_re=r"--paginate repos/[^/]+/[^/]+/pulls\?",
+                rl_core_remaining=0, rl_core_reset=reset_epoch,
+                rl_graphql_remaining=100, rl_graphql_reset=9999,
+            )
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert "pr_error" not in stats, (
+        f"Expected no pr_error after PR list retry, got: {stats.get('pr_error')!r}"
+    )
+    assert 605 in sleep_calls or 605.0 in sleep_calls, (
+        f"Expected sleep(605) for core reset wait, got: {sleep_calls}"
+    )
+    assert stats["prs"] == 3, f"Expected 3 PRs ingested, got: {stats['prs']}"
+    print(f"PASS: PR list rate limit reset wait: sleep_calls={sleep_calls}, prs={stats['prs']}")
+
+
+def test_rate_limit_budget_exhausted(repo: Path) -> None:
+    """When reset wait > remaining budget, no reset wait occurs; PRCommentsIncomplete raised."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+    reset_epoch = 1600  # candidate = 605 s, but budget = 100 s
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = 100.0  # too small for 605 s reset
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # Always rate-limit issues/3/comments so we exhaust retries.
+            _write_fake_gh_rate_limit_always(
+                fake_dir, call_log,
+                fail_endpoint_re=r"issues/3/comments",
+                rl_core_remaining=0, rl_core_reset=reset_epoch,
+                rl_graphql_remaining=100, rl_graphql_reset=9999,
+            )
+            import io
+            buf = io.StringIO()
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                exc_caught = None
+                try:
+                    from unittest.mock import patch
+                    with patch("sys.stdout", buf):
+                        add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+                except PRCommentsIncomplete as e:
+                    exc_caught = e
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete (budget exhausted)"
+    out = buf.getvalue()
+    assert "KG_RATE_LIMIT_WAIT:" not in out, (
+        f"Expected no KG_RATE_LIMIT_WAIT: when budget exhausted, got:\n{out}"
+    )
+    # All sleeps should be _RETRY_DELAYS values (0s) not the 605s reset wait.
+    assert all(s == 0 for s in sleep_calls), (
+        f"Expected only 0-second sleeps (from _RETRY_DELAYS), got: {sleep_calls}"
+    )
+    print(f"PASS: budget exhausted: no reset wait, PRCommentsIncomplete raised, "
+          f"sleep_calls={sleep_calls}")
+
+
+def test_secondary_rate_limit_uses_retry_delays(repo: Path) -> None:
+    """Remaining > 0 means secondary limit: gh api rate_limit is called but _RETRY_DELAYS used."""
+    from rdflib import Graph
+
+    mock_now = 1000.0
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_now = _spine_mod._now
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._now = lambda: mock_now
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # remaining=5 means secondary limit, not hourly.
+            _write_fake_gh_rate_limit_always(
+                fake_dir, call_log,
+                fail_endpoint_re=r"issues/3/comments",
+                rl_core_remaining=5, rl_core_reset=1600,
+                rl_graphql_remaining=100, rl_graphql_reset=9999,
+            )
+            import io
+            buf = io.StringIO()
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                exc_caught = None
+                try:
+                    from unittest.mock import patch
+                    with patch("sys.stdout", buf):
+                        add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+                except PRCommentsIncomplete as e:
+                    exc_caught = e
+            calls = call_log.read_text().splitlines()
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._now = old_now
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete for secondary rate limit"
+    assert any("rate_limit" in c for c in calls), (
+        f"Expected gh api rate_limit to be called for secondary limit check, calls={calls}"
+    )
+    out = buf.getvalue()
+    assert "KG_RATE_LIMIT_WAIT:" not in out, (
+        f"Expected no KG_RATE_LIMIT_WAIT: for secondary limit, got:\n{out}"
+    )
+    # Sleeps are all _RETRY_DELAYS values (0s), not the reset duration.
+    assert all(s == 0 for s in sleep_calls), (
+        f"Expected _RETRY_DELAYS sleeps (0s each), got: {sleep_calls}"
+    )
+    print(f"PASS: secondary rate limit uses _RETRY_DELAYS, "
+          f"rate_limit called, no reset wait, sleep_calls={sleep_calls}")
+
+
+def test_rate_limit_check_fails_uses_retry_delays(repo: Path) -> None:
+    """When gh api rate_limit fails, _RETRY_DELAYS is used and PRCommentsIncomplete raised."""
+    from rdflib import Graph
+
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # Use the standard fake gh which does NOT handle rate_limit (exits 1 unhandled).
+            _write_fake_gh(fake_dir, call_log, rate_limit_pr=3)
+
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                exc_caught = None
+                try:
+                    add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+                except PRCommentsIncomplete as e:
+                    exc_caught = e
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete when rate_limit check fails"
+    # All sleeps should be 0s (_RETRY_DELAYS), not any reset-based value.
+    assert all(s == 0 for s in sleep_calls), (
+        f"Expected only 0-second sleeps from _RETRY_DELAYS, got: {sleep_calls}"
+    )
+    print(f"PASS: rate_limit check fails → _RETRY_DELAYS used, sleep_calls={sleep_calls}")
+
+
+def test_retry_after_no_rate_limit_check(repo: Path) -> None:
+    """retry-after in error text: sleeps that value, never calls gh api rate_limit."""
+    from rdflib import Graph
+
+    retry_after_val = 30
+    sleep_calls: list[float] = []
+    old_sleep = _spine_mod._sleep
+    old_budget = _spine_mod._rate_limit_budget_s
+    _spine_mod._sleep = lambda s: sleep_calls.append(s)
+    _spine_mod._rate_limit_budget_s = _spine_mod._RATE_LIMIT_WAIT_BUDGET_S
+
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            fake_dir = Path(d) / "bin"
+            fake_dir.mkdir()
+            call_log = Path(d) / "calls.log"
+            call_log.write_text("")
+            # Always fail issues/3/comments with retry-after; no rate_limit handler needed.
+            _write_fake_gh_rate_limit_always(
+                fake_dir, call_log,
+                fail_endpoint_re=r"issues/3/comments",
+                rl_core_remaining=0, rl_core_reset=9999,
+                rl_graphql_remaining=0, rl_graphql_reset=9999,
+            )
+            # Rewrite to embed retry-after in the stderr message.
+            script = fake_dir / "gh"
+            src = script.read_text()
+            src = src.replace(
+                "'gh: API rate limit exceeded for installation ID 123.'",
+                f"'gh: API rate limit exceeded. retry-after: {retry_after_val}'",
+            )
+            script.write_text(src)
+
+            with _with_fake_gh(fake_dir):
+                g = Graph()
+                exc_caught = None
+                try:
+                    add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=3)
+                except PRCommentsIncomplete as e:
+                    exc_caught = e
+
+            calls = call_log.read_text().splitlines()
+    finally:
+        _spine_mod._sleep = old_sleep
+        _spine_mod._rate_limit_budget_s = old_budget
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete when retry-after always set"
+    assert not any("rate_limit" in c for c in calls), (
+        f"gh api rate_limit should NOT be called when retry-after is present, calls={calls}"
+    )
+    assert all(s == retry_after_val for s in sleep_calls), (
+        f"Expected all sleeps to be {retry_after_val}s (from retry-after), got: {sleep_calls}"
+    )
+    assert len(sleep_calls) == len(_spine_mod._RETRY_DELAYS), (
+        f"Expected {len(_spine_mod._RETRY_DELAYS)} sleeps, got: {sleep_calls}"
+    )
+    print(f"PASS: retry-after used, rate_limit not called, sleep_calls={sleep_calls}")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -575,6 +1118,13 @@ def main() -> None:
         test_pagination(repo)
         test_dedup_slug(repo)
         test_review_fetch_error_counts_toward_incomplete(repo)
+        test_rest_comment_rate_limit_reset_wait(repo)
+        test_graphql_rate_limit_reset_uses_graphql_key(repo)
+        test_pr_list_rate_limit_reset_wait(repo)
+        test_rate_limit_budget_exhausted(repo)
+        test_secondary_rate_limit_uses_retry_delays(repo)
+        test_rate_limit_check_fails_uses_retry_delays(repo)
+        test_retry_after_no_rate_limit_check(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 
