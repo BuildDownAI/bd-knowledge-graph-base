@@ -1831,7 +1831,7 @@ def test_partial_success_top_level_errors(repo: Path) -> None:
     assert err_count == 1, (
         f"Expected 1 error for null pr2 alias in partial-success response, got {err_str!r}"
     )
-    print(f"PASS: partial success with top-level errors: PR 1 processed, PR 2 error counted")
+    print("PASS: partial success with top-level errors: PR 1 processed, PR 2 error counted")
 
 
 def main() -> None:
