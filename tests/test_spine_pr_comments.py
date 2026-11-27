@@ -1783,14 +1783,14 @@ def test_partial_success_top_level_errors(repo: Path) -> None:
             "        sys.exit(0)\n"
             "\n"
             "if args[:2] == ['api', 'graphql']:\n"
-            # Return errors + partial data: pr1 valid, pr2 null
+            # Return errors + partial data: pr1 valid, pr2 null — exit 1 as real gh does
             "    repo_data = {'pr1': pr1_data, 'pr2': None}\n"
             "    response = {\n"
             "        'errors': [{'message': 'Could not resolve pr2'}],\n"
             "        'data': {'repository': repo_data},\n"
             "    }\n"
             "    print(json.dumps(response))\n"
-            "    sys.exit(0)\n"
+            "    sys.exit(1)\n"
             "\n"
             "if args[:2] == ['api', '--paginate']:\n"
             "    path = args[2] if len(args) > 2 else ''\n"
@@ -1834,6 +1834,424 @@ def test_partial_success_top_level_errors(repo: Path) -> None:
     print("PASS: partial success with top-level errors: PR 1 processed, PR 2 error counted")
 
 
+def test_partial_batch_exit1_19_valid_1_null(repo: Path) -> None:
+    """Batch exits 1 with JSON stdout: 19 valid aliases and 1 null → 19 PRs ingested, 1 error."""
+    from rdflib import Graph
+    from rdflib.namespace import RDF
+    from kg_ingest import iris as _iris
+
+    rc_node = {
+        "databaseId": 9001,
+        "body": "Partial batch recovery: this comment must survive",
+        "author": {"login": "alice", "__typename": "User"},
+        "createdAt": "2026-11-01T10:00:00Z",
+        "commit": {"oid": "abc"},
+        "originalCommit": {"oid": "abc"},
+        "path": "src/x.py",
+        "line": 5,
+        "originalLine": None,
+    }
+    thread = {
+        "isResolved": False, "isOutdated": False,
+        "comments": {"totalCount": 1, "nodes": [rc_node]},
+    }
+
+    # Build 20 PRs: pr1-pr19 have data with one review thread, pr20 is null
+    pr_data_map = {}
+    for i in range(1, 20):
+        pr_data_map[f"pr{i}"] = {
+            "comments": {"totalCount": 0, "nodes": []},
+            "reviews": {"totalCount": 0, "nodes": []},
+            "reviewThreads": {"totalCount": 1, "nodes": [thread]},
+        }
+    pr_data_map["pr20"] = None
+    pr_data_json = json.dumps(pr_data_map)
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            f"pr_data_map = json.loads({pr_data_json!r})\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            "    repo_data = {f'pr{n}': pr_data_map.get(f'pr{n}') for n in pr_nums}\n"
+            "    response = {\n"
+            "        'errors': [{'message': 'Could not resolve pr20'}],\n"
+            "        'data': {'repository': repo_data},\n"
+            "    }\n"
+            "    print(json.dumps(response))\n"
+            "    sys.exit(1)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 21)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=20)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+
+    # 1/20 = 5% < 10% threshold and no rate-limit → no exception
+    assert exc_caught is None, f"PRCommentsIncomplete raised unexpectedly: {exc_caught}"
+
+    # PR 1 (and all 1-19) should have their review comment in the graph
+    cnode = _iris.pr_review_comment("test-org/repo", 1, 9001)
+    assert (cnode, RDF.type, _iris.KG.Verification) in g, (
+        "PR 1 review comment missing despite valid partial GraphQL data"
+    )
+    verification_nodes = list(g.subjects(RDF.type, _iris.KG.Verification))
+    assert len(verification_nodes) == 19, (
+        f"Expected 19 Verification nodes (one per valid PR), got {len(verification_nodes)}"
+    )
+    print("PASS: partial batch exit-1: 19 PRs ingested, 1 error, no PRCommentsIncomplete")
+
+
+def test_single_fallback_all_succeed(repo: Path) -> None:
+    """Batch exits 1 with empty stdout; single queries all succeed → 0 errors, correct call log."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            # Batch query (20 aliases): fail with empty stdout; single queries (1 alias): succeed
+            "    if len(pr_nums) > 1:\n"
+            "        print('GitHub server error', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    repo_data = {f'pr{n}': {'comments': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviews': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviewThreads': {'totalCount': 0, 'nodes': []}}\n"
+            "                 for n in pr_nums}\n"
+            "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 21)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=20)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+                stats = e.stats
+        calls = call_log.read_text().splitlines()
+
+    assert exc_caught is None, f"PRCommentsIncomplete raised unexpectedly: {exc_caught}"
+    assert "pr_comment_errors" not in stats, (
+        f"Expected no errors when all single queries succeed, got: {stats.get('pr_comment_errors')}"
+    )
+    graphql_calls = [c for c in calls if "api graphql" in c]
+    # 1 failed batch call + 20 single calls = 21
+    assert len(graphql_calls) == 21, (
+        f"Expected 1 batch + 20 single = 21 graphql calls, got {len(graphql_calls)}"
+    )
+    print("PASS: single fallback (all succeed): 0 errors, 1 batch + 20 single calls")
+
+
+def test_single_fallback_one_fails(repo: Path) -> None:
+    """Batch exits 1 with empty stdout; single queries: 19 succeed, 1 fails → 1 error."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            # Batch query (20 aliases): fail; single for pr10: fail; others: succeed
+            "    if len(pr_nums) > 1:\n"
+            "        print('GitHub server error', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    if pr_nums == [10]:\n"
+            "        print('temporary failure for pr10', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    repo_data = {f'pr{n}': {'comments': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviews': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviewThreads': {'totalCount': 0, 'nodes': []}}\n"
+            "                 for n in pr_nums}\n"
+            "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 21)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=20)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+                stats = e.stats
+
+    # 1 error / 20 PRs = 5%, no rate-limit → no exception
+    assert exc_caught is None, f"PRCommentsIncomplete raised unexpectedly: {exc_caught}"
+    err_str = stats.get("pr_comment_errors", "")
+    err_count = int(err_str.split(" ")[0]) if err_str else 0
+    assert err_count == 1, f"Expected 1 error (pr10 failed), got: {err_str!r}"
+    print(f"PASS: single fallback (one fails): 1 error, {err_str!r}")
+
+
+def test_rate_limit_batch_no_single_query(repo: Path) -> None:
+    """Rate-limit batch error adds 20 errors and sends no single queries; PRCommentsIncomplete raised."""
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    print('API rate limit exceeded for this resource.', file=sys.stderr)\n"
+            "    sys.exit(1)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 21)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=20)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+        calls = call_log.read_text().splitlines()
+
+    assert exc_caught is not None, "Expected PRCommentsIncomplete for rate-limit batch"
+    stats = exc_caught.stats
+    err_str = stats.get("pr_comment_errors", "")
+    err_count = int(err_str.split(" ")[0]) if err_str else 0
+    assert err_count == 20, f"Expected 20 errors for rate-limit batch of 20, got: {err_str!r}"
+    graphql_calls = [c for c in calls if "api graphql" in c]
+    # _RETRY_DELAYS = (0,0,0) → 4 attempts on the one batch, then exception propagates
+    # No single-alias calls should appear
+    # All graphql calls should be batch calls (multiple aliases), not single calls
+    for c in graphql_calls:
+        alias_count = len(re.findall(r'pullRequest\(number', c))
+        assert alias_count != 1, (
+            f"Found a single-alias graphql call after rate-limit: {c!r}"
+        )
+    print(f"PASS: rate-limit batch → {err_count} errors, no single queries, PRCommentsIncomplete raised")
+
+
+def test_25_prs_one_failed_batch_no_incomplete(repo: Path) -> None:
+    """25 PRs: first batch (20 PRs) fails non-rate-limit with empty stdout; single queries pass.
+
+    Result: no PRCommentsIncomplete (20 errors / 25 PRs = 80% with rate-limit=False is <threshold
+    only because errors become 0 after single-query recovery).
+    """
+    from rdflib import Graph
+
+    with tempfile.TemporaryDirectory() as d:
+        fake_dir = Path(d) / "bin"
+        fake_dir.mkdir()
+        call_log = Path(d) / "calls.log"
+        call_log.write_text("")
+        script = fake_dir / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys, json, re\n"
+            "\n"
+            f"call_log = {str(call_log)!r}\n"
+            "with open(call_log, 'a') as _f:\n"
+            "    _f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "\n"
+            "args = sys.argv[1:]\n"
+            "if args[:1] == ['api'] and '--paginate' not in args and '--jq' in args:\n"
+            "    jq_idx = args.index('--jq')\n"
+            "    if jq_idx + 1 < len(args) and args[jq_idx + 1] == '.default_branch':\n"
+            "        print('main')\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', 'graphql']:\n"
+            "    query_str = ''\n"
+            "    for i, a in enumerate(args):\n"
+            "        if a == '-f' and i + 1 < len(args) and args[i+1].startswith('query='):\n"
+            "            query_str = args[i+1][6:]\n"
+            "            break\n"
+            "    pr_nums = [int(m.group(1)) for m in re.finditer(r'pr(\\d+): pullRequest', query_str)]\n"
+            # First batch (20 PRs): fail with empty stdout; second batch + single queries: succeed
+            "    if len(pr_nums) > 1 and min(pr_nums) == 1:\n"
+            "        print('GitHub 502 Bad Gateway', file=sys.stderr)\n"
+            "        sys.exit(1)\n"
+            "    repo_data = {f'pr{n}': {'comments': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviews': {'totalCount': 0, 'nodes': []},\n"
+            "                             'reviewThreads': {'totalCount': 0, 'nodes': []}}\n"
+            "                 for n in pr_nums}\n"
+            "    print(json.dumps({'data': {'repository': repo_data}}))\n"
+            "    sys.exit(0)\n"
+            "\n"
+            "if args[:2] == ['api', '--paginate']:\n"
+            "    path = args[2] if len(args) > 2 else ''\n"
+            "    if re.search(r'/pulls', path):\n"
+            "        prs = [{'number': i, 'title': f'PR {i}', 'user': {'login': 'alice'},\n"
+            "                'state': 'closed', 'merged_at': '2026-01-01T00:00:00Z',\n"
+            "                'merge_commit_sha': f'sha{i}', 'body': '', 'base': {'ref': 'main'}}\n"
+            "               for i in range(1, 26)]\n"
+            "        print(json.dumps(prs))\n"
+            "        sys.exit(0)\n"
+            "\n"
+            "print('fake gh: unhandled: ' + ' '.join(args), file=sys.stderr)\n"
+            "sys.exit(1)\n"
+        )
+        script.chmod(0o755)
+
+        exc_caught = None
+        with _with_fake_gh(fake_dir):
+            g = Graph()
+            try:
+                stats = add_spine(g, repo, "test-org/repo", max_commits=None, max_prs=25)
+            except PRCommentsIncomplete as e:
+                exc_caught = e
+                stats = e.stats
+
+    assert exc_caught is None, (
+        f"PRCommentsIncomplete raised unexpectedly (single queries should have recovered): "
+        f"{exc_caught.stats if exc_caught else ''}"
+    )
+    assert "pr_comment_errors" not in stats, (
+        f"Expected no errors after single-query recovery, got: {stats.get('pr_comment_errors')}"
+    )
+    assert stats["prs"] == 25, f"Expected 25 PRs ingested, got {stats['prs']}"
+    print("PASS: 25 PRs, 1 failed batch → single queries recover, no PRCommentsIncomplete")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
@@ -1864,6 +2282,11 @@ def main() -> None:
         test_graphql_rate_limit_batch_waits_and_completes(repo)
         test_totalcount_cap_graphql_truncation(repo)
         test_partial_success_top_level_errors(repo)
+        test_partial_batch_exit1_19_valid_1_null(repo)
+        test_single_fallback_all_succeed(repo)
+        test_single_fallback_one_fails(repo)
+        test_rate_limit_batch_no_single_query(repo)
+        test_25_prs_one_failed_batch_no_incomplete(repo)
 
     print(f"\n[OK] all tests passed — namespace={iris.NAMESPACE}")
 

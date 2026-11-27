@@ -274,6 +274,125 @@ def _build_pr_graphql_field(n: int) -> str:
     )
 
 
+def _map_pr_node(pr_node: dict, n: int) -> dict:
+    """Map a GraphQL PR node to {comments, review_comments, reviews, thread_states}."""
+    comments = [
+        {
+            "id": cm["databaseId"],
+            "body": cm.get("body") or "",
+            "user": {"login": _author_login(cm.get("author"))},
+            "created_at": cm.get("createdAt") or "",
+        }
+        for cm in ((pr_node.get("comments") or {}).get("nodes") or [])
+        if cm
+    ]
+
+    reviews_obj = pr_node.get("reviews") or {}
+    reviews_total_count = reviews_obj.get("totalCount") or 0
+    reviews_raw = reviews_obj.get("nodes") or []
+    reviews = [
+        {
+            "id": rv["databaseId"],
+            "body": rv.get("body") or "",
+            "user": {"login": _author_login(rv.get("author"))},
+            "submitted_at": rv.get("submittedAt") or "",
+            "state": rv.get("state") or "",
+            "commit_id": (rv.get("commit") or {}).get("oid") or "",
+        }
+        for rv in reviews_raw
+        if rv
+    ]
+
+    threads_obj = pr_node.get("reviewThreads") or {}
+    threads_total_count = threads_obj.get("totalCount") or 0
+    threads = threads_obj.get("nodes") or []
+    review_comments: list[dict] = []
+    thread_states: dict[int, str] = {}
+
+    for thread in threads:
+        if not thread:
+            continue
+        state = (
+            "resolved" if thread.get("isResolved")
+            else "outdated" if thread.get("isOutdated")
+            else "open"
+        )
+        for idx, tc in enumerate((thread.get("comments") or {}).get("nodes") or []):
+            if not tc:
+                continue
+            cid = tc["databaseId"]
+            review_comments.append({
+                "id": cid,
+                "body": tc.get("body") or "",
+                "user": {"login": _author_login(tc.get("author"))},
+                "created_at": tc.get("createdAt") or "",
+                "commit_id": (tc.get("commit") or {}).get("oid") or "",
+                "original_commit_id": (tc.get("originalCommit") or {}).get("oid") or "",
+                "path": tc.get("path") or "",
+                "line": tc.get("line"),
+                "original_line": tc.get("originalLine"),
+            })
+            if idx == 0:
+                thread_states[int(cid)] = state
+
+    rc_cap_count = max(len(review_comments), threads_total_count)
+    if rc_cap_count > _MAX_PR_REVIEW_ITEMS:
+        print(
+            f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
+            f"{rc_cap_count} inline review comments; "
+            f"capped at {_MAX_PR_REVIEW_ITEMS}"
+        )
+        review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
+
+    rv_cap_count = max(len(reviews), reviews_total_count)
+    if rv_cap_count > _MAX_PR_REVIEW_ITEMS:
+        print(
+            f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
+            f"{rv_cap_count} review bodies; "
+            f"capped at {_MAX_PR_REVIEW_ITEMS}"
+        )
+        reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
+
+    return {
+        "comments": comments[:_MAX_PR_COMMENTS],
+        "review_comments": review_comments,
+        "reviews": reviews,
+        "thread_states": thread_states,
+    }
+
+
+def _fetch_single_pr(
+    repo_path: Path, owner: str, repo_name: str, n: int,
+    result: dict[int, dict], _pr_errors: list[str], _empty: dict,
+) -> None:
+    """Fetch one PR via its own single-alias GraphQL query; updates result and _pr_errors in place."""
+    single_query = (
+        "query($owner: String!, $name: String!) {"
+        f" repository(owner: $owner, name: $name) {{ {_build_pr_graphql_field(n)} }}"
+        " }"
+    )
+    try:
+        stdout = _gh_api(
+            ["api", "graphql",
+             "-f", f"query={single_query}",
+             "-F", f"owner={owner}",
+             "-F", f"name={repo_name}"],
+            cwd=str(repo_path),
+        )
+        data = json.loads(stdout)
+        repo_data = (data.get("data") or {}).get("repository") or {}
+        pr_node = repo_data.get(f"pr{n}")
+        if pr_node is None:
+            _pr_errors.append(f"null alias pr{n} in single-query response")
+            result[n] = dict(_empty)
+        else:
+            result[n] = _map_pr_node(pr_node, n)
+    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as exc:
+        err_text = (getattr(exc, "stderr", None) or str(exc))[:300]
+        _pr_errors.append(err_text)
+        result[n] = dict(_empty)
+
+
 def _fetch_pr_details_batch(
     repo_path: Path, repo_slug: str, pr_numbers: list[int],
     _pr_errors: list[str],
@@ -281,7 +400,9 @@ def _fetch_pr_details_batch(
     """Fetch comments, reviews, and review threads for up to _PR_DETAIL_BATCH PRs per GraphQL call.
 
     Returns {pr_number: {comments, review_comments, reviews, thread_states}}.
-    Failed batches or null aliases add one entry per PR to _pr_errors and return empty data.
+    Rate-limit errors add one entry per PR to _pr_errors (no single queries).
+    Non-rate-limit errors attempt partial-data recovery from exc.stdout, then fall back to
+    individual single-alias queries so only genuinely failed PRs contribute an error.
     """
     owner, repo_name = repo_slug.split("/", 1)
     result: dict[int, dict] = {}
@@ -295,6 +416,7 @@ def _fetch_pr_details_batch(
             f" repository(owner: $owner, name: $name) {{ {pr_fields} }}"
             " }"
         )
+        repo_data: dict | None = None
         try:
             stdout = _gh_api(
                 ["api", "graphql",
@@ -304,14 +426,31 @@ def _fetch_pr_details_batch(
                 cwd=str(repo_path),
             )
             data = json.loads(stdout)
-        except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as exc:
+            repo_data = (data.get("data") or {}).get("repository") or {}
+        except subprocess.CalledProcessError as exc:
             err_text = (getattr(exc, "stderr", None) or str(exc))[:300]
+            is_rate_limit = "rate limit" in err_text.lower() or "abuse" in err_text.lower()
+            if is_rate_limit:
+                for n in batch:
+                    _pr_errors.append(err_text)
+                    result[n] = dict(_empty)
+                continue
+            # Non-rate-limit: try to recover partial data from stdout before falling back.
+            try:
+                partial = json.loads(exc.stdout or "")
+                candidate = (partial.get("data") or {}).get("repository")
+                if candidate is not None:
+                    repo_data = candidate
+            except (json.JSONDecodeError, AttributeError):
+                pass
+            if repo_data is None:
+                for n in batch:
+                    _fetch_single_pr(repo_path, owner, repo_name, n, result, _pr_errors, _empty)
+                continue
+        except (FileNotFoundError, json.JSONDecodeError):
             for n in batch:
-                _pr_errors.append(err_text)
-                result[n] = dict(_empty)
+                _fetch_single_pr(repo_path, owner, repo_name, n, result, _pr_errors, _empty)
             continue
-
-        repo_data = (data.get("data") or {}).get("repository") or {}
 
         for n in batch:
             pr_node = repo_data.get(f"pr{n}")
@@ -319,90 +458,7 @@ def _fetch_pr_details_batch(
                 _pr_errors.append(f"null alias pr{n} in GraphQL response")
                 result[n] = dict(_empty)
                 continue
-
-            comments = [
-                {
-                    "id": cm["databaseId"],
-                    "body": cm.get("body") or "",
-                    "user": {"login": _author_login(cm.get("author"))},
-                    "created_at": cm.get("createdAt") or "",
-                }
-                for cm in ((pr_node.get("comments") or {}).get("nodes") or [])
-                if cm
-            ]
-
-            reviews_obj = pr_node.get("reviews") or {}
-            reviews_total_count = reviews_obj.get("totalCount") or 0
-            reviews_raw = reviews_obj.get("nodes") or []
-            reviews = [
-                {
-                    "id": rv["databaseId"],
-                    "body": rv.get("body") or "",
-                    "user": {"login": _author_login(rv.get("author"))},
-                    "submitted_at": rv.get("submittedAt") or "",
-                    "state": rv.get("state") or "",
-                    "commit_id": (rv.get("commit") or {}).get("oid") or "",
-                }
-                for rv in reviews_raw
-                if rv
-            ]
-
-            threads_obj = pr_node.get("reviewThreads") or {}
-            threads_total_count = threads_obj.get("totalCount") or 0
-            threads = threads_obj.get("nodes") or []
-            review_comments: list[dict] = []
-            thread_states: dict[int, str] = {}
-
-            for thread in threads:
-                if not thread:
-                    continue
-                state = (
-                    "resolved" if thread.get("isResolved")
-                    else "outdated" if thread.get("isOutdated")
-                    else "open"
-                )
-                for idx, tc in enumerate((thread.get("comments") or {}).get("nodes") or []):
-                    if not tc:
-                        continue
-                    cid = tc["databaseId"]
-                    review_comments.append({
-                        "id": cid,
-                        "body": tc.get("body") or "",
-                        "user": {"login": _author_login(tc.get("author"))},
-                        "created_at": tc.get("createdAt") or "",
-                        "commit_id": (tc.get("commit") or {}).get("oid") or "",
-                        "original_commit_id": (tc.get("originalCommit") or {}).get("oid") or "",
-                        "path": tc.get("path") or "",
-                        "line": tc.get("line"),
-                        "original_line": tc.get("originalLine"),
-                    })
-                    if idx == 0:
-                        thread_states[int(cid)] = state
-
-            rc_cap_count = max(len(review_comments), threads_total_count)
-            if rc_cap_count > _MAX_PR_REVIEW_ITEMS:
-                print(
-                    f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
-                    f"{rc_cap_count} inline review comments; "
-                    f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                )
-                review_comments = review_comments[:_MAX_PR_REVIEW_ITEMS]
-
-            rv_cap_count = max(len(reviews), reviews_total_count)
-            if rv_cap_count > _MAX_PR_REVIEW_ITEMS:
-                print(
-                    f"KG_PR_REVIEW_ITEMS_CAP: PR {n} has "
-                    f"{rv_cap_count} review bodies; "
-                    f"capped at {_MAX_PR_REVIEW_ITEMS}"
-                )
-                reviews = reviews[:_MAX_PR_REVIEW_ITEMS]
-
-            result[n] = {
-                "comments": comments[:_MAX_PR_COMMENTS],
-                "review_comments": review_comments,
-                "reviews": reviews,
-                "thread_states": thread_states,
-            }
+            result[n] = _map_pr_node(pr_node, n)
 
     return result
 

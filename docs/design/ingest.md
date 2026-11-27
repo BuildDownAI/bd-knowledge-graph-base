@@ -152,8 +152,12 @@ producing `ai-implement-orchestrator-bot[bot]` to match the REST shape that
 The batched call goes through the same `_gh_api` retry and rate-limit helper. All
 batch calls use the `graphql` rate-limit resource key (not `core`).
 
-A fetch error on a batch adds one `_pr_errors` entry per PR in the batch. The same
-`_has_rate_limit_error` / 10 % threshold / `PRCommentsIncomplete` rule applies.
+A rate-limit error on a batch adds one `_pr_errors` entry per PR in the batch and skips
+single queries. A non-rate-limit `CalledProcessError` first reads `exc.stdout` for a partial
+answer: when `data.repository` is present the per-alias null check runs against that data, so
+only the null aliases become errors; when no usable data is found, each PR in the batch is
+re-fetched with its own single-alias query so at most one failed PR contributes one error.
+The same `_has_rate_limit_error` / 10 % threshold / `PRCommentsIncomplete` rule applies.
 
 The REST pull request list call (`pulls?state=all&per_page=100`) is kept. `merged_at`,
 `merge_commit_sha`, and `base.ref` come from it.
